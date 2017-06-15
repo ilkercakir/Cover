@@ -296,3 +296,15 @@ void set_eqdefaults(eqdefaults *d)
 		d->dbGains[i] = default_dbGains[i];
 	}
 }
+
+void saveto_eqdefaults(eqdefaults *d, audioequalizer *eq)
+{
+	int i;
+	for(i=0;i<eq->bands;i++)
+	{
+		d->eqfreqs[i] = eq->freqs[i];
+		strcpy(d->eqlabels[i], eq->labels[i]);
+		d->filtertypes[i] = eq->filtertypes[i];
+		d->dbGains[i] = eq->dbGains[i];
+	}
+}

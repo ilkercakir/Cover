@@ -1,6 +1,8 @@
 #ifndef AudioSpkH
 #define AudioSpkH
 
+#define _GNU_SOURCE 
+
 #include <pthread.h>
 #include <alsa/asoundlib.h>
 

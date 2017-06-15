@@ -1,6 +1,8 @@
 #ifndef AudioDevH
 #define AudioDevH
 
+#include <stdio.h>
+
 #include <gtk/gtk.h>
 #include <alsa/asoundlib.h>
 

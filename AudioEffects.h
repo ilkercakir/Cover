@@ -1,6 +1,11 @@
 #ifndef AudioEffectsH
 #define AudioEffectsH
 
+#define _GNU_SOURCE
+
+#include <math.h>
+#include <pthread.h>
+#include <alsa/asoundlib.h>
 #include "BiQuad.h"
 
 typedef enum

@@ -22,7 +22,6 @@
  */
 
 #include "AudioDev.h"
-#include <stdio.h>
 
 void populate_card_list(GtkWidget *comboinputdev, GtkWidget *combooutputdev)
 {

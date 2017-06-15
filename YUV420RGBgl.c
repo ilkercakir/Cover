@@ -21,8 +21,6 @@
  * 
  */
 
-#include <stdio.h>
-#include <assert.h>
 #include "YUV420RGBgl.h"
 
 GLfloat vVertices[] = { -1.0f,  1.0f, 0.0f, // Position 0

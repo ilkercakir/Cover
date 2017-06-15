@@ -21,9 +21,6 @@
  * 
  */
 
-#include <math.h>
-#include <pthread.h>
-#include <alsa/asoundlib.h>
 #include "AudioEffects.h"
 #include "AudioEffectsDefaults.h"
 

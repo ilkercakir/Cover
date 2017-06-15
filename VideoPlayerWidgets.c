@@ -23,6 +23,160 @@
 
 #include "VideoPlayerWidgets.h"
 
+void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, int vqMaxLength, int aqMaxLength)
+{
+	plparams->vpw = vpw;
+	plparams->vqMaxLength = vqMaxLength;
+	plparams->aqMaxLength = aqMaxLength;
+}
+
+void close_playlistparams(playlistparams *plparams)
+{
+}
+
+gboolean play_next(vpwidgets *vpw)
+{
+	GtkTreeModel *model;
+	GtkTreeSelection *selection;
+	GtkTreeIter iter;
+
+	model = gtk_tree_view_get_model(GTK_TREE_VIEW(vpw->listview));
+	selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(vpw->listview));
+
+	gtk_tree_selection_get_selected(selection, &model, &iter);
+	if (gtk_tree_model_iter_next(model, &iter))
+	{
+		gtk_tree_selection_select_iter(selection, &iter);
+	}
+	else
+	{
+		if (gtk_tree_model_iter_nth_child (model, &iter, NULL, 0))
+		{
+			gtk_tree_selection_select_iter(selection, &iter);
+		}
+		else
+		{
+			printf("no entries\n");
+			return FALSE;
+		}
+	}
+
+	if (vpw->vp.now_playing)
+	{
+		g_free(vpw->vp.now_playing);
+		vpw->vp.now_playing = NULL;
+	}
+	gtk_tree_model_get(model, &iter, COL_FILEPATH, &(vpw->vp.now_playing), -1);
+	//g_print("Next %s\n", now_playing);
+
+	return TRUE;
+}
+
+gboolean play_prev(vpwidgets *vpw)
+{
+	GtkTreeModel *model;
+	GtkTreeSelection *selection;
+	GtkTreeIter iter;
+
+	model = gtk_tree_view_get_model(GTK_TREE_VIEW(vpw->listview));
+	selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(vpw->listview));
+
+	gtk_tree_selection_get_selected(selection, &model, &iter);
+	if (gtk_tree_model_iter_previous(model, &iter))
+	{
+		gtk_tree_selection_select_iter(selection, &iter);
+	}
+	else
+	{
+		gint nodecount = gtk_tree_model_iter_n_children (model, NULL);
+		if (nodecount)
+		{
+			if (gtk_tree_model_iter_nth_child (model, &iter, NULL, nodecount-1))
+			{
+				gtk_tree_selection_select_iter(selection, &iter);
+			}
+			else
+			{
+				printf("no entries\n");
+				return FALSE;
+			}
+		}
+	}
+
+	if (vpw->vp.now_playing)
+	{
+		g_free(vpw->vp.now_playing);
+		vpw->vp.now_playing = NULL;
+	}
+	gtk_tree_model_get(model, &iter, COL_FILEPATH, &(vpw->vp.now_playing), -1);
+	//g_print("Next %s\n", now_playing);
+
+	return TRUE;
+}
+
+int create_thread0_videoplayer(vpwidgets *vpw, int vqMaxLength, int aqMaxLength)
+{
+	videoplayer *v = &(vpw->vp);
+	v->aeq = &(vpw->ae);
+
+	int err;
+
+	init_videoplayer(v, vpw->playerWidth, vpw->playerHeight, vqMaxLength, aqMaxLength, vpw->ax);
+	if ((err=open_now_playing(v))<0)
+	{
+		printf("open_now_playing() error %d\n", err);
+		return(err);
+	}
+
+	err = pthread_create(&(v->tid[0]), NULL, &thread0_videoplayer, (void *)v);
+	if (err)
+	{}
+//printf("thread0_videoplayer->%d\n", 0);
+	if ((err=pthread_setaffinity_np(v->tid[0], sizeof(cpu_set_t), &(v->cpu[0]))))
+		printf("pthread_setaffinity_np error %d\n", err);
+
+	int i;
+	if ((i=pthread_join(v->tid[0], NULL)))
+		printf("pthread_join error, v->tid[0], %d\n", i);
+
+	return(v->stoprequested);
+}
+
+static gpointer playlist_thread(gpointer args)
+{
+	int ctype = PTHREAD_CANCEL_ASYNCHRONOUS;
+	int ctype_old;
+	pthread_setcanceltype(ctype, &ctype_old);
+
+	playlistparams *plp = (playlistparams*)args;
+
+	while(1)
+	{
+		if (create_thread0_videoplayer(plp->vpw, plp->vqMaxLength, plp->aqMaxLength))
+			break;
+		if (!play_next(plp->vpw))
+			break;
+	}
+
+//printf("exiting playlist_thread\n");
+	plp->vpw->retval0 = 0;
+	pthread_exit(&(plp->vpw->retval0));
+}
+
+int create_playlist_thread(playlistparams *plp)
+{
+	int err;
+
+	err = pthread_create(&(plp->vpw->tid), NULL, &playlist_thread, (void *)plp);
+	if (err)
+	{}
+//printf("playlist_thread->%d\n", 0);
+	if ((err=pthread_setaffinity_np(plp->vpw->tid, sizeof(cpu_set_t), &(plp->vpw->cpu[0]))))
+		printf("pthread_setaffinity_np error %d\n", err);
+
+	return(0);
+}
+
 int select_callback(void *data, int argc, char **argv, char **azColName) 
 {
 	vpwidgets *vpw = (vpwidgets*)data;
@@ -124,26 +278,42 @@ static GtkWidget* create_view_and_model(vpwidgets *vpw, int argc, char** argv)
 
 static void button1_clicked(GtkWidget *button, gpointer data)
 {
-	vpwidgets *vpw = (vpwidgets*)data;
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
 	videoplayer *vpp = &(vpw->vp);
+	int ret;
 
 //g_print("Button 1 clicked\n");
 	if (!(vpp->now_playing))
 		return;
+
+	if((ret=create_playlist_thread(plp))<0)
+	{
+		printf("create_playlist_thread error %d\n", ret);
+		return;
+	}
 
 	gtk_widget_set_sensitive(vpw->button1, FALSE);
 	gtk_widget_set_sensitive(vpw->button2, TRUE);
 	gtk_widget_set_sensitive(vpw->button8, TRUE);
 	gtk_widget_set_sensitive(vpw->button9, TRUE);
 	gtk_widget_set_sensitive(vpw->button10, TRUE);
+
 }
 
 static void button2_clicked(GtkWidget *button, gpointer data)
 {
-	vpwidgets *vpw = (vpwidgets*)data;
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
+	videoplayer *vp = &(vpw->vp);
 
 //g_print("Button 2 clicked\n");
-	requeststop_videoplayer(&(vpw->vp));
+	request_stop_frame_reader(vp);
+
+	int i;
+	if ((i=pthread_join(vpw->tid, NULL)))
+		printf("pthread_join error, vpw->tid, %d\n", i);
+
 	gtk_widget_set_sensitive(vpw->button2, FALSE);
 	gtk_widget_set_sensitive(vpw->button8, FALSE);
 	gtk_widget_set_sensitive(vpw->button9, FALSE);
@@ -153,7 +323,8 @@ static void button2_clicked(GtkWidget *button, gpointer data)
 
 static void button3_clicked(GtkWidget *button, gpointer data)
 {
-	vpwidgets *vpw = (vpwidgets*)data;
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
 
 	GtkTreeModel *model;
 
@@ -168,7 +339,8 @@ static void button3_clicked(GtkWidget *button, gpointer data)
 
 static void button4_clicked(GtkWidget *button, gpointer data)
 {
-	vpwidgets *vpw = (vpwidgets*)data;
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
 
 	GtkTreeModel *model;
 
@@ -315,7 +487,8 @@ void listdir(const char *name, sqlite3 *db, int *id)
 
 static void button6_clicked(GtkWidget *button, gpointer data)
 {
-	vpwidgets *vpw = (vpwidgets*)data;
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
 	videoplayer *vpp = &(vpw->vp);
 
 	GtkWidget *dialog;
@@ -406,7 +579,8 @@ int select_add_lastid(vpwidgets *vpw)
 
 static void button7_clicked(GtkWidget *button, gpointer data)
 {
-	vpwidgets *vpw = (vpwidgets*)data;
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
 
 	char *err_msg = NULL;
 	sqlite3 *db;
@@ -475,31 +649,29 @@ static void button7_clicked(GtkWidget *button, gpointer data)
 
 static void button8_clicked(GtkWidget *button, gpointer data)
 {
-	vpwidgets *vpw = (vpwidgets*)data;
-
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
 //g_print("Button 8 clicked\n");
-	requeststop_videoplayer(&(vpw->vp));
-	drain_videoplayer(&(vpw->vp));
-
-	//play_next(NULL);
+	button2_clicked(vpw->button2, data);
+	if (play_next(vpw))
+		button1_clicked(vpw->button1, data);
 }
 
 static void button9_clicked(GtkWidget *button, gpointer data)
 {
-	vpwidgets *vpw = (vpwidgets*)data;
-
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
 //g_print("Button 9 clicked\n");
-	requeststop_videoplayer(&(vpw->vp));
-	drain_videoplayer(&(vpw->vp));
-
-	//play_prev(NULL);
+	button2_clicked(vpw->button2, data);
+	if (play_prev(vpw))
+		button1_clicked(vpw->button1, data);
 }
 
 static void button10_clicked(GtkWidget *button, gpointer data)
 {
-	vpwidgets *vpw = (vpwidgets*)data;
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
 	videoplayer *vpp = &(vpw->vp);
-
 //g_print("Button 10 clicked\n");
 	if (vpp->vpq.playerstatus==PLAYING)
 	{
@@ -945,7 +1117,8 @@ gboolean scale_released(GtkWidget *widget, GdkEvent *event, gpointer user_data)
 
 void listview_onRowActivated(GtkTreeView *treeview, GtkTreePath *path, GtkTreeViewColumn *col, gpointer userdata)
 {
-	vpwidgets *vpw = (vpwidgets*)userdata;
+	playlistparams *plp = (playlistparams*)userdata;
+	vpwidgets *vpw = plp->vpw;
 	videoplayer *vpp = &(vpw->vp);
 	GtkTreeModel *model;
 	GtkTreeIter iter;
@@ -968,8 +1141,7 @@ void listview_onRowActivated(GtkTreeView *treeview, GtkTreePath *path, GtkTreeVi
 		//g_free(s);
 		if (!(vpp->vpq.playerstatus == IDLE))
 		{
-			button2_clicked(vpw->button2, vpw);
-			drain_videoplayer(vpp);
+			button2_clicked(vpw->button2, userdata);
 		}
 		if (vpp->now_playing)
 		{
@@ -978,7 +1150,10 @@ void listview_onRowActivated(GtkTreeView *treeview, GtkTreePath *path, GtkTreeVi
 		}
 		gtk_tree_model_get(model, &iter, COL_FILEPATH, &(vpp->now_playing), -1);
 //g_print ("Double-clicked path %s\n", now_playing);
-		button1_clicked(vpw->button1, vpw);
+
+		if (vpp->vpq.playerstatus!=IDLE)
+			button2_clicked(vpw->button2, userdata);
+		button1_clicked(vpw->button1, userdata);
 	}
 }
 
@@ -992,12 +1167,12 @@ static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, gpointer data)
 //printf("Draw %d\n", gettid());
 //	get_first_time_microseconds_1();
 
-	g_mutex_lock(&(vpw->pixbufmutex));
+	g_mutex_lock(&(vpw->vp.pixbufmutex));
 	//cr = gdk_cairo_create (gtk_widget_get_window(dwgarea));
-	gdk_cairo_set_source_pixbuf(cr, vpw->pixbuf, 0, 0);
+	gdk_cairo_set_source_pixbuf(cr, vpw->vp.pixbuf, 0, 0);
 	cairo_paint(cr);
 	//cairo_destroy(cr);
-	g_mutex_unlock(&(vpw->pixbufmutex));
+	g_mutex_unlock(&(vpw->vp.pixbufmutex));
 
 /*
 	diff6=get_next_time_microseconds_1();
@@ -1008,6 +1183,15 @@ static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, gpointer data)
     return FALSE;
 }
 
+void setDrawingArea(vpwidgets *vpw)
+{
+	vpw->vp.playerWidth = vpw->playerWidth;
+	vpw->vp.playerHeight = vpw->playerHeight;
+	vpw->vp.dwgarea = vpw->dwgarea;
+	vpw->vp.pixbuf = NULL;
+	initPixbuf(&(vpw->vp));
+}
+/*
 gboolean invalidate(gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
@@ -1030,18 +1214,19 @@ void initPixbuf(vpwidgets *vpw)
 {
 	int i;
 
-	guchar *imgdata = malloc(vpw->dawidth*vpw->daheight*4); // RGBA
-	for(i=0;i<vpw->dawidth*vpw->daheight;i++)
+	guchar *imgdata = malloc(vpw->playerWidth*vpw->playerHeight*4); // RGBA
+	for(i=0;i<vpw->playerWidth*vpw->playerHeight;i++)
 	{
 		((unsigned int *)imgdata)[i]=0xFF000000; // ABGR
 	}
 	g_mutex_lock(&(vpw->pixbufmutex));
 	if (vpw->pixbuf)
 		g_object_unref(vpw->pixbuf);
-    vpw->pixbuf = gdk_pixbuf_new_from_data(imgdata, GDK_COLORSPACE_RGB, TRUE, 8, vpw->dawidth, vpw->daheight, vpw->dawidth*4, destroynotify, NULL);
+    vpw->pixbuf = gdk_pixbuf_new_from_data(imgdata, GDK_COLORSPACE_RGB, TRUE, 8, vpw->playerWidth, vpw->playerHeight, vpw->playerWidth*4, destroynotify, NULL);
 	g_mutex_unlock(&(vpw->pixbufmutex));
 	gdk_threads_add_idle(invalidate, vpw);
 }
+*/
 
 void resize_containers(vpwidgets *vpw)
 {
@@ -1099,10 +1284,23 @@ void toggle_vp(vpwidgets *vpw, GtkWidget *togglebutton)
 		gtk_widget_hide(vpw->vpwindow);
 }
 
-void init_videoplayerwidgets(vpwidgets *vpw, int argc, char** argv, int playWidth, int playHeight)
+void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int playWidth, int playHeight, audiomixer *x)
 {
-	vpw->dawidth = vpw->playerWidth = playWidth;
-	vpw->daheight = vpw->playerHeight = playHeight;
+	vpwidgets *vpw = plp->vpw;
+	vpw->ax = x; // Audio Mixer
+
+	vpw->vp.now_playing = NULL; // Video Player
+	vpw->vp.vpq.playerstatus = IDLE;
+
+	vpw->playerWidth = playWidth;
+	vpw->playerHeight = playHeight;
+
+	int i;
+	for(i=0;i<4;i++)
+	{
+		CPU_ZERO(&(vpw->cpu[i]));
+		CPU_SET(i, &(vpw->cpu[i]));
+	}
 
     /* create a new window */
     vpw->vpwindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -1139,17 +1337,14 @@ void init_videoplayerwidgets(vpwidgets *vpw, int argc, char** argv, int playWidt
 
 // drawing area
     vpw->dwgarea = gtk_drawing_area_new();
-    gtk_widget_set_size_request(vpw->dwgarea, vpw->dawidth, vpw->daheight);
+    gtk_widget_set_size_request(vpw->dwgarea, vpw->playerWidth, vpw->playerHeight);
     //gtk_widget_set_size_request (dwgarea, 1280, 720);
     gtk_container_add(GTK_CONTAINER(vpw->box1), vpw->dwgarea);
-
     // Signals used to handle the backing surface
     g_signal_connect(vpw->dwgarea, "draw", G_CALLBACK(draw_cb), (void*)vpw);
     gtk_widget_set_app_paintable(vpw->dwgarea, TRUE);
 
-// pixbuf
-	vpw->pixbuf = NULL;
-	initPixbuf(vpw);
+	setDrawingArea(vpw); // pass drawing area and initialize pixbuf
 
 // horizontal scale
     vpw->hadjustment = gtk_adjustment_new(50, 0, 100, 1, 10, 0);
@@ -1172,30 +1367,30 @@ void init_videoplayerwidgets(vpwidgets *vpw, int argc, char** argv, int playWidt
 // button prev
     vpw->button9 = gtk_button_new_with_label("Prev");
     gtk_widget_set_sensitive (vpw->button9, FALSE);
-    g_signal_connect(GTK_BUTTON(vpw->button9), "clicked", G_CALLBACK(button9_clicked), vpw);
+    g_signal_connect(GTK_BUTTON(vpw->button9), "clicked", G_CALLBACK(button9_clicked), plp);
     gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button9);
 
 // button play
     vpw->button1 = gtk_button_new_with_label("Play");
-    g_signal_connect(GTK_BUTTON(vpw->button1), "clicked", G_CALLBACK(button1_clicked), vpw);
+    g_signal_connect(GTK_BUTTON(vpw->button1), "clicked", G_CALLBACK(button1_clicked), plp);
     gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button1);
 
 // button pause/resume
     vpw->button10 = gtk_button_new_with_label("Pause");
     gtk_widget_set_sensitive (vpw->button10, FALSE);
-    g_signal_connect(GTK_BUTTON(vpw->button10), "clicked", G_CALLBACK(button10_clicked), vpw);
+    g_signal_connect(GTK_BUTTON(vpw->button10), "clicked", G_CALLBACK(button10_clicked), plp);
     gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button10);
 
 // button next
     vpw->button8 = gtk_button_new_with_label("Next");
     gtk_widget_set_sensitive (vpw->button8, FALSE);
-    g_signal_connect(GTK_BUTTON(vpw->button8), "clicked", G_CALLBACK(button8_clicked), vpw);
+    g_signal_connect(GTK_BUTTON(vpw->button8), "clicked", G_CALLBACK(button8_clicked), plp);
     gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button8);
 
 // button stop
     vpw->button2 = gtk_button_new_with_label("Stop");
     gtk_widget_set_sensitive(vpw->button2, FALSE);
-    g_signal_connect(GTK_BUTTON(vpw->button2), "clicked", G_CALLBACK(button2_clicked), vpw);
+    g_signal_connect(GTK_BUTTON(vpw->button2), "clicked", G_CALLBACK(button2_clicked), plp);
     gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button2);
 
 // button Parameters
@@ -1210,11 +1405,11 @@ void init_videoplayerwidgets(vpwidgets *vpw, int argc, char** argv, int playWidt
     vpw->scrolled_window = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_set_border_width(GTK_CONTAINER(vpw->scrolled_window), 10);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(vpw->scrolled_window), GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
-    gtk_widget_set_size_request(vpw->scrolled_window, vpw->dawidth, vpw->daheight);
+    gtk_widget_set_size_request(vpw->scrolled_window, vpw->playerWidth, vpw->playerHeight);
     gtk_container_add(GTK_CONTAINER(vpw->box2), vpw->scrolled_window);
 
     vpw->listview = create_view_and_model(vpw, argc, argv);
-    g_signal_connect(vpw->listview, "row-activated", (GCallback)listview_onRowActivated, vpw);
+    g_signal_connect(vpw->listview, "row-activated", (GCallback)listview_onRowActivated, plp);
     gtk_container_add(GTK_CONTAINER(vpw->scrolled_window), vpw->listview);
 
     vpw->button_box2 = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
@@ -1222,19 +1417,19 @@ void init_videoplayerwidgets(vpwidgets *vpw, int argc, char** argv, int playWidt
     gtk_container_add(GTK_CONTAINER(vpw->box2), vpw->button_box2);
 
     vpw->button3 = gtk_button_new_with_label("Clear");
-    g_signal_connect(GTK_BUTTON(vpw->button3), "clicked", G_CALLBACK(button3_clicked), vpw);
+    g_signal_connect(GTK_BUTTON(vpw->button3), "clicked", G_CALLBACK(button3_clicked), plp);
     gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button3);
 
     vpw->button6 = gtk_button_new_with_label("Catalog");
-    g_signal_connect(GTK_BUTTON(vpw->button6), "clicked", G_CALLBACK(button6_clicked), vpw);
+    g_signal_connect(GTK_BUTTON(vpw->button6), "clicked", G_CALLBACK(button6_clicked), plp);
     gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button6);
 
     vpw->button7 = gtk_button_new_with_label("Add File");
-    g_signal_connect(GTK_BUTTON(vpw->button7), "clicked", G_CALLBACK(button7_clicked), vpw);
+    g_signal_connect(GTK_BUTTON(vpw->button7), "clicked", G_CALLBACK(button7_clicked), plp);
     gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button7);
 
     vpw->button4 = gtk_button_new_with_label("Load");
-    g_signal_connect(GTK_BUTTON(vpw->button4), "clicked", G_CALLBACK(button4_clicked), vpw);
+    g_signal_connect(GTK_BUTTON(vpw->button4), "clicked", G_CALLBACK(button4_clicked), plp);
     gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button4);
 // box2 contents end
 
@@ -1434,7 +1629,17 @@ void init_videoplayerwidgets(vpwidgets *vpw, int argc, char** argv, int playWidt
 
 void close_videoplayerwidgets(vpwidgets *vpw)
 {
-	if (vpw->pixbuf)
-		g_object_unref(vpw->pixbuf);
+	closePixbuf(&(vpw->vp));
 	AudioEqualizer_close(&(vpw->ae));
+}
+
+void press_vp_stop_button(playlistparams *plp)
+{
+	vpwidgets *vpw = plp->vpw;
+	videoplayer *vp = &(vpw->vp);
+
+	if (vp->vpq.playerstatus!=IDLE)
+	{
+		button2_clicked(vpw->button2, plp);
+	}
 }

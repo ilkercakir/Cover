@@ -28,7 +28,6 @@ link with gcc -Wall -o "%e" "%f" AudioDev.o AudioEffects.o AudioMic.o AudioMixer
 
 #define _GNU_SOURCE
 
-
 #include "AudioDev.h"
 #include "AudioEffects.h"
 #include "AudioMic.h"
@@ -125,8 +124,9 @@ microphone mic;
 audiomixer mx;
 audiojack jack1;
 speaker spk;
-videoplayer vp;
+
 vpwidgets vpw1;
+playlistparams plparams;
 
 static void push_message(GtkWidget *widget, gint cid, char *msg)
 {
@@ -230,7 +230,7 @@ static gpointer recorderthread(gpointer args)
 	close_audiojack(&jack1);
 	close_mic(&mic);
 
-//printf("exiting 1\n");
+//printf("exiting 0\n");
 	retval_thread1 = 0;
 	pthread_exit(&retval_thread1);
 }
@@ -269,7 +269,7 @@ static gpointer mixerthread(gpointer args)
 }
 
 /*
-static gpointer readerthread(gpointer args) // test using file
+static gpointer filereaderthread(gpointer args) // test using file
 {
 	int ctype = PTHREAD_CANCEL_ASYNCHRONOUS;
 	int ctype_old;
@@ -314,20 +314,20 @@ static gpointer thread0(gpointer args)
 	err = pthread_create(&(tid[1]), NULL, &recorderthread, NULL);
 	if (err)
 	{}
+//printf("recorderthread->%d\n", 1);
 	CPU_ZERO(&(cpu[1]));
 	CPU_SET(1, &(cpu[1]));
-	err = pthread_setaffinity_np(tid[1], sizeof(cpu_set_t), &(cpu[1]));
-	if (err)
-	{}
+	if ((err=pthread_setaffinity_np(tid[1], sizeof(cpu_set_t), &(cpu[1]))))
+		printf("pthread_setaffinity_np error %d\n", err);
 
 	err = pthread_create(&(tid[2]), NULL, &mixerthread, NULL);
 	if (err)
 	{}
+//printf("mixerthread->%d\n", 1);
 	CPU_ZERO(&(cpu[2]));
 	CPU_SET(2, &(cpu[2]));
-	err = pthread_setaffinity_np(tid[2], sizeof(cpu_set_t), &(cpu[2]));
-	if (err)
-	{}
+	if ((err=pthread_setaffinity_np(tid[2], sizeof(cpu_set_t), &(cpu[1]))))
+		printf("pthread_setaffinity_np error %d\n", err);
 
 	int i;
 	if ((i=pthread_join(tid[1], NULL)))
@@ -351,20 +351,23 @@ int create_thread0(void)
 	err = pthread_create(&(tid[0]), NULL, &thread0, NULL);
 	if (err)
 	{}
+//printf("thread0->%d\n", 1);
 	CPU_ZERO(&(cpu[0]));
 	CPU_SET(0, &(cpu[0]));
-	err = pthread_setaffinity_np(tid[0], sizeof(cpu_set_t), &(cpu[0]));
-	if (err)
-	{}
+	if ((err=pthread_setaffinity_np(tid[0], sizeof(cpu_set_t), &(cpu[0]))))
+		printf("pthread_setaffinity_np error %d\n", err);
 
 	return(0);
 }
 
-void terminate_thread0(void)
+void terminate_thread0(gpointer data)
 {
-	int i;
+	playlistparams *plp = (playlistparams *)data;
+
+	press_vp_stop_button(plp);
 
 	mic.status = MC_STOPPED;
+	int i;
 	if ((i=pthread_join(tid[0], NULL)))
 		printf("pthread_join error, tid[0], %d\n", i);
 
@@ -373,7 +376,7 @@ void terminate_thread0(void)
 
 static gboolean delete_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 {
-	terminate_thread0();
+	terminate_thread0(data);
 	return FALSE; // return FALSE to emit destroy signal
 }
 
@@ -392,7 +395,7 @@ static void inputdev_changed(GtkWidget *combo, gpointer data)
 {
 	gchar *strval;
 
-	terminate_thread0();
+	terminate_thread0(data);
 	g_object_get((gpointer)combo, "active-id", &strval, NULL);
 	//printf("Selected id %s\n", strval);
 	create_thread0();
@@ -401,7 +404,7 @@ static void inputdev_changed(GtkWidget *combo, gpointer data)
 
 static void frames_changed(GtkWidget *widget, gpointer data)
 {
-	terminate_thread0();
+	terminate_thread0(data);
 	create_thread0();
 }
 
@@ -409,7 +412,7 @@ static void outputdev_changed(GtkWidget *combo, gpointer data)
 {
 	gchar *strval;
 
-	terminate_thread0();
+	terminate_thread0(data);
 	g_object_get((gpointer)combo, "active-id", &strval, NULL);
 	//printf("Selected id %s\n", strval);
 	create_thread0();
@@ -682,7 +685,7 @@ int main(int argc, char *argv[])
 	* titlebar), we ask it to call the delete_event () function
 	* as defined above. The data passed to the callback
 	* function is NULL and is ignored in the callback function. */
-	g_signal_connect (window, "delete-event", G_CALLBACK (delete_event), NULL);
+	g_signal_connect (window, "delete-event", G_CALLBACK (delete_event), (void*)&plparams);
     
 	/* Here we connect the "destroy" event to a signal handler.  
 	* This event occurs when we call gtk_widget_destroy() on the window,
@@ -718,7 +721,7 @@ int main(int argc, char *argv[])
 	spinbutton1 = gtk_spin_button_new_with_range(32.0, 1024.0 , 1.0);
 	gtk_widget_set_size_request(spinbutton1, 120, 30);
 	gtk_spin_button_set_value(GTK_SPIN_BUTTON(spinbutton1), (float)frames_default);
-	g_signal_connect(GTK_SPIN_BUTTON(spinbutton1), "value-changed", G_CALLBACK(frames_changed), NULL);
+	g_signal_connect(GTK_SPIN_BUTTON(spinbutton1), "value-changed", G_CALLBACK(frames_changed), (void*)&vpw1);
 	gtk_container_add(GTK_CONTAINER(confbox), spinbutton1);
 
 // output devices combobox
@@ -729,8 +732,8 @@ int main(int argc, char *argv[])
 	gtk_container_add(GTK_CONTAINER(confbox), combooutputdev);
 
 	populate_card_list(comboinputdev, combooutputdev); // Fill input/output devices combo boxes
-	g_signal_connect(GTK_COMBO_BOX(comboinputdev), "changed", G_CALLBACK(inputdev_changed), NULL);
-	g_signal_connect(GTK_COMBO_BOX(combooutputdev), "changed", G_CALLBACK(outputdev_changed), NULL);
+	g_signal_connect(GTK_COMBO_BOX(comboinputdev), "changed", G_CALLBACK(inputdev_changed), (void*)&vpw1);
+	g_signal_connect(GTK_COMBO_BOX(combooutputdev), "changed", G_CALLBACK(outputdev_changed), (void*)&vpw1);
 
 // checkbox
 	vpw1.vpvisible = TRUE;
@@ -920,12 +923,11 @@ int main(int argc, char *argv[])
 
 
 	gtk_widget_show_all(window);
-	init_videoplayerwidgets(&vpw1, argc, argv, 800, 450);
+	init_playlistparams(&plparams, &vpw1, 25, 50);
+	init_videoplayerwidgets(&plparams, argc, argv, 800, 450, &mx);
 	create_thread0();
 	gtk_main();
 	close_videoplayerwidgets(&vpw1);
-
+	close_playlistparams(&plparams);
 	exit(0);
 }
-
-

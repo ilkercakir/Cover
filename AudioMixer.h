@@ -1,6 +1,8 @@
 #ifndef AudioMixerH
 #define AudioMixerH
 
+#define _GNU_SOURCE
+
 #include <math.h>
 #include <pthread.h>
 #include <alsa/asoundlib.h>

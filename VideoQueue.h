@@ -1,6 +1,8 @@
 #ifndef VideoQueueH
 #define VideoQueueH
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -37,6 +39,7 @@ typedef struct
 void vq_init(videoplayerqueue *vpq, int maxLength);
 void vq_add(videoplayerqueue *vpq,  char *yuv, int64_t label);
 videoqueue* vq_remove_element(videoqueue **q);
+videoqueue* vq_remove(videoplayerqueue *vpq);
 void vq_requeststop(videoplayerqueue *vpq);
 void vq_signalstop(videoplayerqueue *vpq);
 void vq_drain(videoplayerqueue *vpq);

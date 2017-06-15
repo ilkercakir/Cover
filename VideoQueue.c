@@ -43,7 +43,7 @@ void vq_init(videoplayerqueue *vpq, int maxLength)
 	if((ret=pthread_cond_init(&(vpq->vqxcond), NULL))!=0 )
 		printf("vqxcond init failed, %d\n", ret);
 
-	vpq->playerstatus = IDLE;
+	vpq->playerstatus = PLAYING;
 }
 
 void vq_add(videoplayerqueue *vpq,  char *yuv, int64_t label)

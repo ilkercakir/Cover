@@ -1,9 +1,12 @@
 #ifndef VideoPlayerWidgetsH
 #define VideoPlayerWidgetsH
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <pthread.h>
 
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
@@ -12,15 +15,16 @@
 
 #include <sqlite3.h>
 
+#include "AudioMixer.h"
 #include "VideoPlayer.h"
 #include "BiQuad.h"
 
 typedef struct
 {
 GtkWidget *vpwindow;
-GdkPixbuf *pixbuf;
 GtkWidget *box1;
 GtkWidget *horibox;
+GtkWidget *dwgarea;
 GtkWidget *button_box;
 GtkWidget *button1;
 GtkWidget *button2;
@@ -28,7 +32,6 @@ GtkWidget *button8;
 GtkWidget *button9;
 GtkWidget *button10;
 GtkWidget *buttonParameters;
-GtkWidget *dwgarea;
 GtkAdjustment *hadjustment;
 GtkWidget *hscale;
 GtkWidget *stackswitcher;
@@ -97,7 +100,6 @@ GtkWidget *eqlabelA;
 GtkWidget *eqenable;
 GtkWidget *eqautolevel;
 GtkWidget *combopreset;
-GMutex pixbufmutex;
 
 GtkWidget *windowparm;
 GtkWidget *parmvbox;
@@ -138,16 +140,27 @@ GtkWidget *nbpage3;
 int vpvisible;
 int hscaleupd;
 int playerWidth, playerHeight;
-int dawidth, daheight;
 
 videoplayer vp;
 eqdefaults aedef;
 audioequalizer ae;
-
+audiomixer *ax;
 int last_id;
+pthread_t tid;
+int retval0;
+cpu_set_t cpu[4];
 }vpwidgets;
 
+typedef struct
+{
+vpwidgets *vpw;
+int vqMaxLength, aqMaxLength;
+}playlistparams;
+
+void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, int vqMaxLength, int aqMaxLength);
+void close_playlistparams(playlistparams *plparams);
 void toggle_vp(vpwidgets *vpw, GtkWidget *togglebutton);
-void init_videoplayerwidgets(vpwidgets *vpw, int argc, char** argv, int playWidth, int playHeight);
+void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int playWidth, int playHeight, audiomixer *x);
 void close_videoplayerwidgets(vpwidgets *vpw);
+void press_vp_stop_button(playlistparams *plp);
 #endif

@@ -147,9 +147,8 @@ void deallocatechannel_audiomixer(int channel, audiomixer *x)
 
 mxstatus readfrommixer(audiomixer *x)
 {
-	memset(x->outbuffer, 0, x->outbuffersize);
-
 	pthread_mutex_lock(x->xmutex);
+	memset(x->outbuffer, 0, x->outbuffersize);
 	int i, j;
 	for(i=0;i<x->channelcount;i++)
 	{
@@ -167,6 +166,7 @@ mxstatus readfrommixer(audiomixer *x)
 				signed short *fshort = (signed short *)(channelbuffer[(*front)]);
 				int samplesreadable = x->ac[i]->channelsamples - (*readoffset);
 				samplesreadable = (samplesreadable>samplestoread?samplestoread:samplesreadable);
+//printf("reading %d samples from channel %d\n", samplesreadable, i);
 				if (x->blocking)
 				{
 					while ((*front) == (*rear)) // queue empty
@@ -196,7 +196,8 @@ mxstatus readfrommixer(audiomixer *x)
 						{
 							(*front)++;
 							(*front)%=x->ac[i]->channelbuffers;
-							pthread_cond_signal(x->xhighcond); // Should wake up *one* thread
+							//pthread_cond_signal(x->xhighcond); // Should wake up *one* thread
+							pthread_cond_broadcast(x->xhighcond); // Should wake up *all* threads
 						}
 					}
 				}
@@ -303,7 +304,7 @@ void writetojack(char* inbuffer, int inbuffersize, audiojack *aj)
 		(*(aj->rear))++;
 		(*(aj->rear))%=aj->channelbuffers;
 		pthread_cond_signal(aj->x->xlowcond); // Should wake up *one* thread
-//printf("written to jack, channel %d, rear %d\n", aj->mxchannel, (*(aj->rear)));
+//printf("written to jack, channel %d, front %d rear %d\n", aj->mxchannel, (*(aj->front)), (*(aj->rear)));
 	}
 	else
 		printf("init_audiojack can not allocate channel\n");

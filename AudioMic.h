@@ -1,8 +1,11 @@
 #ifndef AudioMicH
 #define AudioMicH
 
+#define _GNU_SOURCE 
+
 #include <pthread.h>
 #include <alsa/asoundlib.h>
+
 #include "AudioEffects.h"
 
 #define mono 1

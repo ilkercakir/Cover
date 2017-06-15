@@ -1,6 +1,8 @@
 #ifndef BiQuadH
 #define BiQuadH
 
+#define _GNU_SOURCE 
+
 #include <stdint.h>
 #include <math.h>
 #include <pthread.h>
@@ -69,4 +71,5 @@ void AudioEqualizer_setAutoLeveling(audioequalizer *eq, int autoleveling);
 void AudioEqualizer_close(audioequalizer *eq);
 void AudioEqualizer_BiQuadProcess(audioequalizer *eq, uint8_t *buf, int bufsize);
 void set_eqdefaults(eqdefaults *d);
+void saveto_eqdefaults(eqdefaults *d, audioequalizer *eq);
 #endif
