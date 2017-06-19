@@ -66,10 +66,11 @@ typedef struct
     AVDictionary *optionsDict;
     AVDictionary *optionsDictA;
 
-	int frametime;
+	int frametime, decodevideo;
 	double frame_rate, sample_rate;
 	int64_t now_playing_frame, now_decoding_frame, videoduration, audioduration;
 	long diff1, diff2, diff3, diff4, diff5, diff7, framesskipped;
+	void *vpwp; int hscaleupd;
 }videoplayer;
 
 void initPixbuf(videoplayer *v);
@@ -81,5 +82,7 @@ void signalstop_videoplayer(videoplayer *v);
 void drain_videoplayer(videoplayer *v);
 int open_now_playing(videoplayer *v);
 void request_stop_frame_reader(videoplayer *v);
-void* thread0_videoplayer(void* args);
+gpointer thread0_videoplayer(void* args);
+gboolean update_hscale(gpointer data); // defined inside VideoPlayerWidgets.c
+gboolean set_upper(gpointer data); // defined inside VideoPlayerWidgets.c
 #endif

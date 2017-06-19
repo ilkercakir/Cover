@@ -25,6 +25,7 @@
 int init_audio_hw_mic(microphone *m)
 {
 	int err;
+	snd_pcm_uframes_t size;
 
 	snd_pcm_hw_params_alloca(&(m->hw_params));
 	//snd_pcm_sw_params_alloca(&sw_params);
@@ -39,7 +40,7 @@ int init_audio_hw_mic(microphone *m)
 	{
 		printf("cannot initialize hardware parameter structure (%s)\n", snd_strerror(err));
 		return(err);
-  }
+	}
 
 	if ((err = snd_pcm_hw_params_set_access(m->capture_handle, m->hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0)
 	{
@@ -64,6 +65,20 @@ int init_audio_hw_mic(microphone *m)
 		printf("cannot set channel count (%s)\n", snd_strerror(err));
 		return(err);
 	}
+
+//printf("buffersize %d\n", m->capturebuffersize);
+	if ((err = snd_pcm_hw_params_set_buffer_size(m->capture_handle, m->hw_params, m->capturebuffersize)) < 0)
+	{
+		printf("Unable to set buffer size %d for capture: %s\n", m->capturebuffersize, snd_strerror(err));
+		return err;
+	}
+
+	if ((err = snd_pcm_hw_params_get_buffer_size(m->hw_params, &size)) < 0)
+	{
+		printf("Unable to get buffer size for capture: %s\n", snd_strerror(err));
+		return(err);
+	}
+	m->capturebuffersize = size;
 
 	if ((err = snd_pcm_hw_params(m->capture_handle, m->hw_params)) < 0)
 	{
@@ -212,9 +227,45 @@ void haas_close(michaas *h)
 	soundmod_close(&(h->sndmod));
 }
 
+static int xrun_recovery(snd_pcm_t *handle, int err) // Underrun and suspend recovery
+{
+	if (err == -EPIPE)	// under-run
+	{
+		err = snd_pcm_prepare(handle);
+		if (err < 0)
+			printf("Can't recover from underrun, prepare failed: %s\n", snd_strerror(err));
+		return(0);
+	}
+	else if (err == -ESTRPIPE)
+	{
+		while ((err = snd_pcm_resume(handle)) == -EAGAIN)
+			sleep(1);	/* wait until the suspend flag is released */
+		if (err < 0)
+		{
+			err = snd_pcm_prepare(handle);
+			if (err < 0)
+				printf("Can't recover from suspend, prepare failed: %s\n", snd_strerror(err));
+		}
+		return(0);
+	}
+	return(err);
+}
+
 void init_mic(microphone *m, char* device, snd_pcm_format_t format, unsigned int rate, int outframes, int haasenabled, float haasms, int modenabled, float modrate, float moddepth)
 {
-	strcpy(m->device, device);
+	int ret;
+
+	if (device)
+	{
+		m->device = malloc(32);
+		strcpy(m->device, device);
+	}
+	else
+		m->device = NULL;
+
+	m->micmutex = malloc(sizeof(pthread_mutex_t));
+	if((ret=pthread_mutex_init(m->micmutex, NULL))!=0 )
+		printf("mic mutex init failed, %d\n", ret);
 
 	m->format = format; // SND_PCM_FORMAT_S16_LE;
 	m->rate = rate;
@@ -223,6 +274,7 @@ void init_mic(microphone *m, char* device, snd_pcm_format_t format, unsigned int
 	m->bufferframes = outframes;
 	m->buffersamples = m->bufferframes * mono;
 	m->buffersize = m->buffersamples * ( snd_pcm_format_width(m->format) / 8 );
+	m->capturebuffersize = 20 * m->buffersize;
 	m->buffer = malloc(m->buffersize);
 	memset(m->buffer, 0, m->buffersize);
 
@@ -231,13 +283,89 @@ void init_mic(microphone *m, char* device, snd_pcm_format_t format, unsigned int
 
 int read_mic(microphone *m)
 {
-	int err;
+	pthread_mutex_lock(m->micmutex);
+	int err, result = 1;
+	//snd_pcm_sframes_t frames;
+
+	//frames = snd_pcm_avail(m->capture_handle);
+//printf("available capture frames %ld\n", frames);
+
+	err = snd_pcm_readi(m->capture_handle, m->buffer, m->bufferframes);
+	if (err == -EAGAIN) printf("EAGAIN mic\n");
+	if (err < 0)
+	{
+		if (xrun_recovery(m->capture_handle, err) < 0)
+		{
+			printf("snd_pcm_readi error: %s\n", snd_strerror(err));
+		}
+	}
+/*
+	frames = snd_pcm_readi(m->capture_handle, m->buffer, m->bufferframes);
+	if (frames < 0)
+	{
+		err = frames = snd_pcm_recover(m->capture_handle, frames, 0);
+		if (frames < 0)
+		{
+			printf("snd_pcm_readi failed: %s\n", snd_strerror(err));
+			result = 0;
+		}
+	}
+*/
+/*
+printf("available capture frames %ld\n", frames);
 	if ((err = snd_pcm_readi(m->capture_handle, m->buffer, m->bufferframes)) != m->bufferframes)
 	{
-		printf("snd_pcm_readi error: %s\n", snd_strerror(err));
-		return(0);
+		printf("snd_pcm_readi error %d : %s\n", err, snd_strerror(err));
+		result=0;
 	}
-	return(1);
+*/
+/*
+	int result=1, framestoread, framesread=0, readoffset=0;
+	framestoread =  m->bufferframes;
+	do
+	{
+printf("mic reading %d frames\n", framestoread);
+		framesread = snd_pcm_readi(m->capture_handle, m->buffer+readoffset, framestoread);
+printf("mic read %d frames\n", framesread);
+		if (framesread<0)
+		{
+			printf("snd_pcm_readi error: %s\n", snd_strerror(framesread));
+			result = 0;
+			break;
+		}
+		else
+		{
+			readoffset += framesread * ( snd_pcm_format_width(m->format) / 8 ) * m->channels;
+			framestoread -= framesread;
+		}
+	}while (framestoread>0);
+*/
+	pthread_mutex_unlock(m->micmutex);
+	return(result);
+}
+
+snd_pcm_sframes_t discard_mic(microphone *m)
+{
+	int ret, err;
+	char *buf;
+
+	buf = malloc(m->buffersize);
+
+	pthread_mutex_lock(m->micmutex);
+	while (((ret=snd_pcm_avail(m->capture_handle))>=m->bufferframes))
+	{
+printf("mic discarding %d frames\n", m->bufferframes);
+		if ((err = snd_pcm_readi(m->capture_handle, m->buffer, m->bufferframes)) != m->bufferframes)
+		{
+			printf("snd_pcm_readi error: %s\n", snd_strerror(err));
+			err=0;
+		}
+	}
+	pthread_mutex_unlock(m->micmutex);
+	
+	free(buf);
+
+	return(ret);
 }
 
 void signalstop_mic(microphone *m)
@@ -247,6 +375,10 @@ void signalstop_mic(microphone *m)
 
 void close_mic(microphone *m)
 {
+	pthread_mutex_destroy(m->micmutex);
+	free(m->micmutex);
 	free(m->buffer);
+	if (m->device)
+		free(m->device);
 	haas_close(&(m->mh));
 }

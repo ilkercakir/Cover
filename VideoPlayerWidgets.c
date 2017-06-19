@@ -114,6 +114,20 @@ gboolean play_prev(vpwidgets *vpw)
 	return TRUE;
 }
 
+gboolean set_upper(gpointer data)
+{
+	vpwidgets *vpw = (vpwidgets *)data;
+	videoplayer *v = &(vpw->vp);
+
+	gtk_adjustment_set_value(vpw->hadjustment, 0);
+	if (v->videoduration)
+		gtk_adjustment_set_upper(vpw->hadjustment, v->videoduration);
+	else
+		gtk_adjustment_set_upper(vpw->hadjustment, v->audioduration);
+
+	return FALSE;
+}
+
 int create_thread0_videoplayer(vpwidgets *vpw, int vqMaxLength, int aqMaxLength)
 {
 	videoplayer *v = &(vpw->vp);
@@ -122,6 +136,12 @@ int create_thread0_videoplayer(vpwidgets *vpw, int vqMaxLength, int aqMaxLength)
 	int err;
 
 	init_videoplayer(v, vpw->playerWidth, vpw->playerHeight, vqMaxLength, aqMaxLength, vpw->ax);
+
+	gint pageno;
+	g_object_get((gpointer)vpw->notebook, "page", &pageno, NULL);
+//printf("Selected id %d\n", pageno);
+	v->decodevideo = !pageno;
+
 	if ((err=open_now_playing(v))<0)
 	{
 		printf("open_now_playing() error %d\n", err);
@@ -131,10 +151,11 @@ int create_thread0_videoplayer(vpwidgets *vpw, int vqMaxLength, int aqMaxLength)
 	err = pthread_create(&(v->tid[0]), NULL, &thread0_videoplayer, (void *)v);
 	if (err)
 	{}
+/*
 //printf("thread0_videoplayer->%d\n", 0);
 	if ((err=pthread_setaffinity_np(v->tid[0], sizeof(cpu_set_t), &(v->cpu[0]))))
 		printf("pthread_setaffinity_np error %d\n", err);
-
+*/
 	int i;
 	if ((i=pthread_join(v->tid[0], NULL)))
 		printf("pthread_join error, v->tid[0], %d\n", i);
@@ -170,10 +191,11 @@ int create_playlist_thread(playlistparams *plp)
 	err = pthread_create(&(plp->vpw->tid), NULL, &playlist_thread, (void *)plp);
 	if (err)
 	{}
+/*
 //printf("playlist_thread->%d\n", 0);
 	if ((err=pthread_setaffinity_np(plp->vpw->tid, sizeof(cpu_set_t), &(plp->vpw->cpu[0]))))
 		printf("pthread_setaffinity_np error %d\n", err);
-
+*/
 	return(0);
 }
 
@@ -697,7 +719,7 @@ static void vscale0(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 0, value);
 	if (vpw->ae.autoleveling)
@@ -708,7 +730,7 @@ static void vscale1(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 1, value);
 	if (vpw->ae.autoleveling)
@@ -719,7 +741,7 @@ static void vscale2(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 2, value);
 	if (vpw->ae.autoleveling)
@@ -730,7 +752,7 @@ static void vscale3(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 3, value);
 	if (vpw->ae.autoleveling)
@@ -741,7 +763,7 @@ static void vscale4(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 4, value);
 	if (vpw->ae.autoleveling)
@@ -752,7 +774,7 @@ static void vscale5(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 5, value);
 	if (vpw->ae.autoleveling)
@@ -763,7 +785,7 @@ static void vscale6(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 6, value);
 	if (vpw->ae.autoleveling)
@@ -774,7 +796,7 @@ static void vscale7(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 7, value);
 	if (vpw->ae.autoleveling)
@@ -785,7 +807,7 @@ static void vscale8(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 8, value);
 	if (vpw->ae.autoleveling)
@@ -796,7 +818,7 @@ static void vscale9(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-    float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 0.0 - gtk_range_get_value(GTK_RANGE(widget));
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 9, value);
 	if (vpw->ae.autoleveling)
@@ -805,8 +827,11 @@ static void vscale9(GtkWidget *widget, gpointer data)
 
 static void vscaleA(GtkWidget *widget, gpointer data)
 {
-//    float value = 1.0 - gtk_range_get_value(GTK_RANGE(widget));
-//    printf("Adjustment value: %f\n", value);
+	vpwidgets *vpw = (vpwidgets*)data;
+
+	float value = 16.0 - gtk_range_get_value(GTK_RANGE(widget));
+//	printf("Adjustment value: %f\n", value);
+	AudioEqualizer_setEffectiveGain(&(vpw->ae), value);
 }
 
 gchar* scale_valueformat(GtkScale *scale, gdouble value, gpointer user_data)
@@ -1149,7 +1174,7 @@ void listview_onRowActivated(GtkTreeView *treeview, GtkTreePath *path, GtkTreeVi
 			vpp->now_playing = NULL;
 		}
 		gtk_tree_model_get(model, &iter, COL_FILEPATH, &(vpp->now_playing), -1);
-//g_print ("Double-clicked path %s\n", now_playing);
+//g_print ("Double-clicked path %s\n", vpp->now_playing);
 
 		if (vpp->vpq.playerstatus!=IDLE)
 			button2_clicked(vpw->button2, userdata);
@@ -1284,6 +1309,24 @@ void toggle_vp(vpwidgets *vpw, GtkWidget *togglebutton)
 		gtk_widget_hide(vpw->vpwindow);
 }
 
+void page_switched(GtkNotebook *notebook, GtkWidget *page, guint page_num, gpointer user_data)
+{
+	vpwidgets *vpw = (vpwidgets *)user_data;
+
+//printf("switched to page %d\n", page_num);
+	vpw->vp.decodevideo = !page_num;
+}
+
+gboolean update_hscale(gpointer data)
+{
+	vpwidgets *vpw = (vpwidgets*)data;
+	videoplayer *vp = &(vpw->vp);
+
+	if (vp->hscaleupd)
+		gtk_adjustment_set_value(vpw->hadjustment, vp->now_playing_frame);
+	return FALSE;
+}
+
 void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int playWidth, int playHeight, audiomixer *x)
 {
 	vpwidgets *vpw = plp->vpw;
@@ -1291,6 +1334,7 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
 
 	vpw->vp.now_playing = NULL; // Video Player
 	vpw->vp.vpq.playerstatus = IDLE;
+	vpw->vp.vpwp = (void*)vpw;
 
 	vpw->playerWidth = playWidth;
 	vpw->playerHeight = playHeight;
@@ -1611,13 +1655,14 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
     gtk_stack_add_titled(GTK_STACK(vpw->stack), vpw->eqvbox, "eqvbox", "Equalizer");
 */
 	vpw->notebook = gtk_notebook_new();
-	gtk_container_add(GTK_CONTAINER(vpw->playerbox), vpw->notebook);
 	vpw->nbpage1 = gtk_label_new("Player");
 	gtk_notebook_append_page(GTK_NOTEBOOK(vpw->notebook), vpw->box1, vpw->nbpage1);
 	vpw->nbpage2 = gtk_label_new("Playlist");
 	gtk_notebook_append_page(GTK_NOTEBOOK(vpw->notebook), vpw->box2, vpw->nbpage2);
 	vpw->nbpage3 = gtk_label_new("Equalizer");
 	gtk_notebook_append_page(GTK_NOTEBOOK(vpw->notebook), vpw->eqvbox, vpw->nbpage3);
+	g_signal_connect(GTK_NOTEBOOK(vpw->notebook), "switch-page", G_CALLBACK(page_switched), vpw);
+	gtk_container_add(GTK_CONTAINER(vpw->playerbox), vpw->notebook);
 
 // eqvbox contents end
 
@@ -1641,5 +1686,29 @@ void press_vp_stop_button(playlistparams *plp)
 	if (vp->vpq.playerstatus!=IDLE)
 	{
 		button2_clicked(vpw->button2, plp);
+	}
+}
+
+gboolean setnotebooktab1(gpointer data)
+{
+	vpwidgets *vpw = (vpwidgets *)data;
+
+	gtk_notebook_set_current_page(GTK_NOTEBOOK(vpw->notebook), 1);
+	return FALSE;
+}
+
+void vpw_commandline(playlistparams *plp, int argcount)
+{
+	vpwidgets *vpw = plp->vpw;
+
+	if (argcount>1)
+	{
+		GtkTreePath *tp = gtk_tree_path_new_from_string("0");
+		GtkTreeSelection *ts = gtk_tree_view_get_selection(GTK_TREE_VIEW(vpw->listview));
+		gtk_tree_selection_select_path(ts, tp);
+		listview_onRowActivated(GTK_TREE_VIEW(vpw->listview), tp, NULL, plp);
+		gtk_tree_path_free(tp);
+
+		gdk_threads_add_idle(setnotebooktab1, vpw);
 	}
 }

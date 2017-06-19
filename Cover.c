@@ -117,8 +117,9 @@ int retval_thread0, retval_thread1, retval_thread2, retval_thread3;
 snd_pcm_format_t samplingformat = SND_PCM_FORMAT_S16;
 int samplingrate = 44100;
 int queueLength = 2;
-
 int frames_default = 128;
+
+int mixerChannels = 2;
 
 microphone mic;
 audiomixer mx;
@@ -182,6 +183,17 @@ void Reverb_closeAll(reverbeffect *r)
 	pthread_mutex_unlock(&(r->sndreverb.reverbmutex));
 }
 
+gboolean close_windows_idle(gpointer data)
+{
+	gtk_main_quit();
+	return(FALSE);
+}
+
+void close_windows()
+{
+	gdk_threads_add_idle(close_windows_idle, NULL);
+}
+
 static gpointer recorderthread(gpointer args)
 {
 	int ctype = PTHREAD_CANCEL_ASYNCHRONOUS;
@@ -193,42 +205,54 @@ static gpointer recorderthread(gpointer args)
 	//mic.device = "hw:1,0";
 	gchar *strval;
 	g_object_get((gpointer)comboinputdev, "active-id", &strval, NULL);
-	init_mic(&mic, strval, SND_PCM_FORMAT_S16_LE, samplingrate, mx.outbufferframes, mic.mh.haasenabled, mic.mh.millisec, mic.mh.sndmod.enabled, mic.mh.sndmod.modfreq, mic.mh.sndmod.moddepth);
-	g_free(strval);
-
-	connect_audiojack(queueLength, &jack1, &mx);
-
-	memset(mic.mh.sbuffer, 0, mic.mh.sbuffersize);
-	writetojack(mic.mh.sbuffer, mic.mh.sbuffersize, &jack1); // kick initialize mixer channel
-
-	Delay_initAll(&delay1, mx.format, mx.rate, mx.channels);
-	Reverb_initAll(&reverb1, mx.format, mx.rate, mx.channels);
-
-	if ((err=init_audio_hw_mic(&mic)))
+	if (strval)
 	{
-		printf("Init mic error %d\n", err);
+		init_mic(&mic, strval, SND_PCM_FORMAT_S16_LE, samplingrate, mx.outbufferframes, mic.mh.haasenabled, mic.mh.millisec, mic.mh.sndmod.enabled, mic.mh.sndmod.modfreq, mic.mh.sndmod.moddepth);
+		g_free(strval);
+		connect_audiojack(queueLength, &jack1, &mx);
+
+		memset(mic.mh.sbuffer, 0, mic.mh.sbuffersize);
+		writetojack(mic.mh.sbuffer, mic.mh.sbuffersize, &jack1); // kick initialize mixer channel
+
+		Delay_initAll(&delay1, mx.format, mx.rate, mx.channels);
+		Reverb_initAll(&reverb1, mx.format, mx.rate, mx.channels);
+
+		if ((err=init_audio_hw_mic(&mic)))
+		{
+			printf("Init mic error %d\n", err);
+		}
+		else
+		{
+			while (mic.status==MC_RUNNING)
+			{
+				if (read_mic(&mic))
+				{
+					haas_add(&(mic.mh));
+					// Process input frames here
+					sounddelay_add(mic.mh.sbuffer, mic.mh.sbuffersize, &(delay1.snddly));
+					soundreverb_add(mic.mh.sbuffer, mic.mh.sbuffersize, &(reverb1.sndreverb));
+//printf("writetojack\n");
+					writetojack(mic.mh.sbuffer, mic.mh.sbuffersize, &jack1);
+				}
+				else
+				{
+					printf("stopping mic\n");
+					mic.status=MC_STOPPED;
+				}
+			}
+			close_audio_hw_mic(&mic);
+		}
+		Reverb_closeAll(&reverb1);
+		Delay_closeAll(&delay1);
+
+		close_audiojack(&jack1);
+		close_mic(&mic);
 	}
 	else
 	{
-		while (mic.status==MC_RUNNING)
-		{
-			if (read_mic(&mic))
-			{
-				haas_add(&(mic.mh));
-				// Process input frames here
-				sounddelay_add(mic.mh.sbuffer, mic.mh.sbuffersize, &(delay1.snddly));
-				soundreverb_add(mic.mh.sbuffer, mic.mh.sbuffersize, &(reverb1.sndreverb));
-//printf("writetojack\n");
-				writetojack(mic.mh.sbuffer, mic.mh.sbuffersize, &jack1); 
-			}
-		}
-		close_audio_hw_mic(&mic);
+		printf("No input devices found, exiting\n");
+		close_windows();
 	}
-	Reverb_closeAll(&reverb1);
-	Delay_closeAll(&delay1);
-
-	close_audiojack(&jack1);
-	close_mic(&mic);
 
 //printf("exiting 0\n");
 	retval_thread1 = 0;
@@ -245,7 +269,8 @@ static gpointer mixerthread(gpointer args)
 	gchar *strval;
 	g_object_get((gpointer)combooutputdev, "active-id", &strval, NULL);
 	init_spk(&spk, strval, samplingformat, samplingrate, stereo);
-	g_free(strval);
+	if (strval)
+		g_free(strval);
 
 	int err;
 	if ((err=init_audio_hw_spk(&spk)))
@@ -257,6 +282,7 @@ static gpointer mixerthread(gpointer args)
 		while (readfrommixer(&mx) != MX_STOPPED)
 		{
 			// process mixed stereo frames here
+
 			write_spk(&spk, mx.outbuffer, mx.outbufferframes);
 		}
 	}
@@ -305,7 +331,8 @@ static gpointer thread0(gpointer args)
 	pthread_setcanceltype(ctype, &ctype_old);
 
 	int frames = (int)gtk_spin_button_get_value(GTK_SPIN_BUTTON(spinbutton1));
-	init_audiomixer(queueLength, MX_BLOCKING, samplingformat, samplingrate, frames, stereo, &mx);
+	init_audiomixer(mixerChannels, MX_BLOCKING, samplingformat, samplingrate, frames, stereo, &mx);
+	//init_audiomixer(mixerChannels, MX_NONBLOCKING, samplingformat, samplingrate, frames, stereo, &mx);
 
 	sprintf(delayms, "%5.2f ms delay, rate %d fps, %d buffers", getdelay_audiomixer(&mx), samplingrate, queueLength);
 	push_message(statusbar, context_id, delayms);
@@ -324,8 +351,8 @@ static gpointer thread0(gpointer args)
 	if (err)
 	{}
 //printf("mixerthread->%d\n", 1);
-	CPU_ZERO(&(cpu[2]));
-	CPU_SET(2, &(cpu[2]));
+	CPU_ZERO(&(cpu[1]));
+	CPU_SET(1, &(cpu[1]));
 	if ((err=pthread_setaffinity_np(tid[2], sizeof(cpu_set_t), &(cpu[1]))))
 		printf("pthread_setaffinity_np error %d\n", err);
 
@@ -352,9 +379,9 @@ int create_thread0(void)
 	if (err)
 	{}
 //printf("thread0->%d\n", 1);
-	CPU_ZERO(&(cpu[0]));
-	CPU_SET(0, &(cpu[0]));
-	if ((err=pthread_setaffinity_np(tid[0], sizeof(cpu_set_t), &(cpu[0]))))
+	CPU_ZERO(&(cpu[1]));
+	CPU_SET(1, &(cpu[1]));
+	if ((err=pthread_setaffinity_np(tid[0], sizeof(cpu_set_t), &(cpu[1]))))
 		printf("pthread_setaffinity_np error %d\n", err);
 
 	return(0);
@@ -393,30 +420,40 @@ static void realize_cb(GtkWidget *widget, gpointer data)
 
 static void inputdev_changed(GtkWidget *combo, gpointer data)
 {
-	gchar *strval;
+	playlistparams *plp = (playlistparams *)data;
+	//gchar *strval;
 
-	terminate_thread0(data);
-	g_object_get((gpointer)combo, "active-id", &strval, NULL);
+	press_vp_stop_button(plp);
+
+	//g_object_get((gpointer)combo, "active-id", &strval, NULL);
 	//printf("Selected id %s\n", strval);
+	//g_free(strval);
+	terminate_thread0(data);
 	create_thread0();
-	g_free(strval);
 }
 
 static void frames_changed(GtkWidget *widget, gpointer data)
 {
+	playlistparams *plp = (playlistparams *)data;
+
+	press_vp_stop_button(plp);
+
 	terminate_thread0(data);
 	create_thread0();
 }
 
 static void outputdev_changed(GtkWidget *combo, gpointer data)
 {
-	gchar *strval;
+	playlistparams *plp = (playlistparams *)data;
+	//gchar *strval;
 
-	terminate_thread0(data);
-	g_object_get((gpointer)combo, "active-id", &strval, NULL);
+	press_vp_stop_button(plp);
+
+	//g_object_get((gpointer)combo, "active-id", &strval, NULL);
 	//printf("Selected id %s\n", strval);
+	//g_free(strval);
+	terminate_thread0(data);
 	create_thread0();
-	g_free(strval);
 }
 
 static void haas_toggled(GtkWidget *togglebutton, gpointer data)
@@ -721,7 +758,7 @@ int main(int argc, char *argv[])
 	spinbutton1 = gtk_spin_button_new_with_range(32.0, 1024.0 , 1.0);
 	gtk_widget_set_size_request(spinbutton1, 120, 30);
 	gtk_spin_button_set_value(GTK_SPIN_BUTTON(spinbutton1), (float)frames_default);
-	g_signal_connect(GTK_SPIN_BUTTON(spinbutton1), "value-changed", G_CALLBACK(frames_changed), (void*)&vpw1);
+	g_signal_connect(GTK_SPIN_BUTTON(spinbutton1), "value-changed", G_CALLBACK(frames_changed), (void*)&plparams);
 	gtk_container_add(GTK_CONTAINER(confbox), spinbutton1);
 
 // output devices combobox
@@ -732,8 +769,8 @@ int main(int argc, char *argv[])
 	gtk_container_add(GTK_CONTAINER(confbox), combooutputdev);
 
 	populate_card_list(comboinputdev, combooutputdev); // Fill input/output devices combo boxes
-	g_signal_connect(GTK_COMBO_BOX(comboinputdev), "changed", G_CALLBACK(inputdev_changed), (void*)&vpw1);
-	g_signal_connect(GTK_COMBO_BOX(combooutputdev), "changed", G_CALLBACK(outputdev_changed), (void*)&vpw1);
+	g_signal_connect(GTK_COMBO_BOX(comboinputdev), "changed", G_CALLBACK(inputdev_changed), (void*)&plparams);
+	g_signal_connect(GTK_COMBO_BOX(combooutputdev), "changed", G_CALLBACK(outputdev_changed), (void*)&plparams);
 
 // checkbox
 	vpw1.vpvisible = TRUE;
@@ -923,10 +960,12 @@ int main(int argc, char *argv[])
 
 
 	gtk_widget_show_all(window);
-	init_playlistparams(&plparams, &vpw1, 25, 50);
+	init_playlistparams(&plparams, &vpw1, 50, 50); // video, audio
 	init_videoplayerwidgets(&plparams, argc, argv, 800, 450, &mx);
 	create_thread0();
+	vpw_commandline(&plparams, argc);
 	gtk_main();
+
 	close_videoplayerwidgets(&vpw1);
 	close_playlistparams(&plparams);
 	exit(0);

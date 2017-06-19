@@ -37,7 +37,8 @@ typedef enum
 
 typedef struct
 {
-	char device[32];
+	pthread_mutex_t *micmutex;
+	char *device;
 	snd_pcm_format_t format;
 	unsigned int rate;
 	unsigned int channels;
@@ -46,6 +47,7 @@ typedef struct
 	micstatus status;
 	char *buffer;
 	int buffersize, bufferframes, buffersamples;
+	int capturebuffersize;
 	michaas mh;
 }microphone;
 
@@ -59,5 +61,5 @@ void init_mic(microphone *m, char* device, snd_pcm_format_t format, unsigned int
 int read_mic(microphone *m);
 void signalstop_mic(microphone *m);
 void close_mic(microphone *m);
-
+snd_pcm_sframes_t discard_mic(microphone *m);
 #endif

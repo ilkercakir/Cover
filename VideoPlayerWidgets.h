@@ -163,4 +163,5 @@ void toggle_vp(vpwidgets *vpw, GtkWidget *togglebutton);
 void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int playWidth, int playHeight, audiomixer *x);
 void close_videoplayerwidgets(vpwidgets *vpw);
 void press_vp_stop_button(playlistparams *plp);
+void vpw_commandline(playlistparams *plp, int argcount);
 #endif

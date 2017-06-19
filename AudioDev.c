@@ -80,7 +80,8 @@ void populate_card_list(GtkWidget *comboinputdev, GtkWidget *combooutputdev)
 			snd_pcm_info_malloc(&info);
 			snd_pcm_info_set_device(info, (unsigned int)device);
 
-			snd_pcm_info_set_stream(info, SND_RAWMIDI_STREAM_INPUT);
+			//snd_pcm_info_set_stream(info, SND_RAWMIDI_STREAM_INPUT);
+			snd_pcm_info_set_stream(info, SND_PCM_STREAM_CAPTURE);
 			snd_ctl_pcm_info(ctl, info);
 			int subs_in = snd_pcm_info_get_subdevices_count(info);
 			//printf("Input subdevices : %d\n", subs_in);
@@ -107,7 +108,7 @@ void populate_card_list(GtkWidget *comboinputdev, GtkWidget *combooutputdev)
 				}
 			}
 
-			snd_pcm_info_set_stream(info, SND_RAWMIDI_STREAM_OUTPUT);
+			snd_pcm_info_set_stream(info, SND_PCM_STREAM_PLAYBACK);
 			snd_ctl_pcm_info(ctl, info);
 			int subs_out = snd_pcm_info_get_subdevices_count(info);
 			//printf("Output subdevices : %d\n", subs_out);

@@ -166,7 +166,7 @@ mxstatus readfrommixer(audiomixer *x)
 				signed short *fshort = (signed short *)(channelbuffer[(*front)]);
 				int samplesreadable = x->ac[i]->channelsamples - (*readoffset);
 				samplesreadable = (samplesreadable>samplestoread?samplestoread:samplesreadable);
-//printf("reading %d samples from channel %d\n", samplesreadable, i);
+//if (i==1) printf("reading %d samples from channel %d\n", samplesreadable, i);
 				if (x->blocking)
 				{
 					while ((*front) == (*rear)) // queue empty
@@ -184,11 +184,12 @@ mxstatus readfrommixer(audiomixer *x)
 							break;
 						}
 					}
-//printf("channel %d writing %d samples from %d to %d\n", i, samplesreadable, (*readoffset), writeoffset);
+//if (i==1) printf("channel %d reading %d samples from %d %d to %d\n", i, samplesreadable, (*front), (*readoffset), writeoffset);
 					for(j=0;j<samplesreadable;j++,samplestoread--)
 					{
 						x->outshort[writeoffset++] += fshort[(*readoffset)++] * x->prescale;
 					}
+//if (i==1) printf("channel %d done\n", i);
 					if (x->ac[i]) // channel not closed
 					{
 						(*readoffset)%=x->ac[i]->channelsamples;
@@ -220,7 +221,8 @@ mxstatus readfrommixer(audiomixer *x)
 						{
 							(*front)++;
 							(*front)%=x->ac[i]->channelbuffers;
-							pthread_cond_signal(x->xhighcond); // Should wake up *one* thread
+							//pthread_cond_signal(x->xhighcond); // Should wake up *one* thread
+							pthread_cond_broadcast(x->xhighcond); // Should wake up *all* threads
 						}
 					}
 				}
@@ -284,7 +286,7 @@ void init_audiojack(int channelbuffers, int buffersize, audiojack *aj)
 	aj->channelbuffer = aj->x->ac[aj->mxchannel]->channelbuffer;
 	aj->rear = &(aj->x->ac[aj->mxchannel]->rear);
 	aj->front = &(aj->x->ac[aj->mxchannel]->front);
-//printf("init_audiojack %d\n", aj->mxchannel);
+//printf("init_audiojack %d buffersize %d\n", aj->mxchannel, buffersize);
 }
 
 void writetojack(char* inbuffer, int inbuffersize, audiojack *aj)
@@ -294,13 +296,15 @@ void writetojack(char* inbuffer, int inbuffersize, audiojack *aj)
 		init_audiojack(aj->channelbuffers, inbuffersize, aj);
 	if (aj->mxchannel!=-1)
 	{
+//if (aj->mxchannel==1) printf("channel buffersize %d\n", aj->x->ac[aj->mxchannel]->channelbuffersize);
 		while ((*(aj->rear)+1)%aj->channelbuffers == *(aj->front)) // queue full
 		{
 //printf("sleeping, jack queue full, channel %d\n", aj->mxchannel);
 			pthread_cond_wait(aj->x->xhighcond, aj->x->xmutex);
 		}
-//printf("writing to %x\n", aj->channelbuffer[*(aj->rear)]);
+//if (aj->mxchannel==1) printf("writing to %x, rear %d, buffersize %d\n", aj->channelbuffer[*(aj->rear)], *(aj->rear), inbuffersize);
 		memcpy(aj->channelbuffer[*(aj->rear)], inbuffer, inbuffersize);
+//printf("write done\n");
 		(*(aj->rear))++;
 		(*(aj->rear))%=aj->channelbuffers;
 		pthread_cond_signal(aj->x->xlowcond); // Should wake up *one* thread
