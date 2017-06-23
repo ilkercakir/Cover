@@ -345,7 +345,7 @@ GLuint LoadProgram ( const char *vertShaderSrc, const char *fragShaderSrc )
 //
 // Initialize the shader and program object
 //
-int Init(CUBE_STATE_T *state)
+int Init_YUV420(CUBE_STATE_T *state)
 {
    state->user_data = malloc(sizeof(UserData));      
    UserData *userData = state->user_data;
@@ -359,84 +359,6 @@ int Init(CUBE_STATE_T *state)
       "   gl_Position = a_position; \n"
       "   v_texCoord = a_texCoord;  \n"
       "}                            \n";
-
-/*
-   GLbyte fShaderStr_stpq[] =  
-      "precision mediump float;                              \n"
-      "varying vec2 v_texCoord;                              \n"
-      "uniform vec2 texSize;                                 \n"
-      "uniform sampler2D texture;                            \n"
-      "void main()                                           \n"
-      "{                                                     \n"
-      "  float y, u, v, r, g, b;                             \n"
-      "  float yx, yy, ux, uy, vx, vy;                       \n"
-
-      "  vec2 texCoord=vec2(v_texCoord.x*texSize.x, v_texCoord.y*texSize.y);\n"
-      "  float oe=floor(mod(texCoord.y/2.0, 2.0));           \n"
-
-      "  yx=v_texCoord.x;                                    \n"
-      "  yy=v_texCoord.y*2.0/3.0;                            \n"
-      "  ux=oe*0.5+v_texCoord.x/2.0;                         \n"
-      "  uy=4.0/6.0+v_texCoord.y/6.0;                        \n"
-      "  vx=ux;                                              \n"
-      "  vy=5.0/6.0+v_texCoord.y/6.0;                        \n"
-
-      "  int x=int(mod(texCoord.x, 8.0));                    \n"
-
-      "  vec4 y4 = vec4(float((x==0)||(x==4)), float((x==1)||(x==5)), float((x==2)||(x==6)), float((x==3)||(x==7))); \n"
-      "  vec4 uv4 = vec4(float((x==0)||(x==1)), float((x==2)||(x==3)), float((x==4)||(x==5)), float((x==6)||(x==7))); \n"
-      "  y=dot(y4,  texture2D(texture, vec2(yx, yy))); \n"
-      "  u=dot(uv4, texture2D(texture, vec2(ux, uy))); \n"
-      "  v=dot(uv4, texture2D(texture, vec2(vx, vy))); \n"
-
-      "  y=1.1643*(y-0.0625);                                \n"
-      "  u=u-0.5;                                            \n"
-      "  v=v-0.5;                                            \n"
-      "  r=y+1.5958*v;                                       \n"
-      "  g=y-0.3917*u-0.8129*v;                              \n"
-      "  b=y+2.017*u;                                        \n"
-
-      "  gl_FragColor=vec4(r, g, b, 1.0);                    \n"
-      "}                                                     \n";
-*/
-
-/*
-   GLbyte fShaderStr_stpq[] =  
-      "precision mediump float;                              \n"
-      "varying vec2 v_texCoord;                              \n"
-      "uniform vec2 texSize;                                 \n"
-      "uniform sampler2D texture;                            \n"
-      "void main()                                           \n"
-      "{                                                     \n"
-      "  float y, u, v, r, g, b;                             \n"
-      "  float yx, yy, ux, uy, vx, vy;                       \n"
-
-      "  vec2 texCoord=vec2(v_texCoord.x*texSize.x, v_texCoord.y*texSize.y);\n"
-      "  float oe=floor(mod(texCoord.y/2.0, 2.0));           \n"
-
-      "  yx=v_texCoord.x;                                    \n"
-      "  yy=v_texCoord.y*2.0/3.0;                            \n"
-      "  ux=oe*0.5+v_texCoord.x/2.0;                         \n"
-      "  uy=4.0/6.0+v_texCoord.y/6.0;                        \n"
-      "  vx=ux;                                              \n"
-      "  vy=5.0/6.0+v_texCoord.y/6.0;                        \n"
-
-      "  int x=int(mod(texCoord.x, 8.0));                    \n"
-
-      "  vec4 y4 = vec4(float((x==0)||(x==4)), float((x==1)||(x==5)), float((x==2)||(x==6)), float((x==3)||(x==7))); \n"
-      "  vec4 uv4 = vec4(float((x==0)||(x==1)), float((x==2)||(x==3)), float((x==4)||(x==5)), float((x==6)||(x==7))); \n"
-      "  y=dot(y4,  texture2D(texture, vec2(yx, yy))); \n"
-      "  u=dot(uv4, texture2D(texture, vec2(ux, uy))); \n"
-      "  v=dot(uv4, texture2D(texture, vec2(vx, vy))); \n"
-
-      "  vec3 yuv=vec3(1.1643*(y-0.0625), u-0.5, v-0.5);     \n"
-      "  vec3 rgb=yuv*mat3(vec3(1.0,  0.0,     1.5958),      \n"
-      "                    vec3(1.0, -0.3917, -0.8129),      \n"
-      "                    vec3(1.0,  2.017,   0.0   ));     \n"
-
-      "  gl_FragColor=vec4(rgb, 1.0);                        \n"
-      "}                                                     \n";
-*/
 
    GLbyte fShaderStr_stpq[] =  
       "precision mediump float;                              \n"
@@ -530,6 +452,132 @@ int Init(CUBE_STATE_T *state)
    glClearColor ( 0.0f, 0.0f, 0.0f, 1.0f );
    glClear(GL_COLOR_BUFFER_BIT);
    return GL_TRUE;
+}
+
+//
+// Initialize the shader and program object
+//
+int Init_YUV422(CUBE_STATE_T *p_state)
+{
+   p_state->user_data = malloc(sizeof(UserData));      
+   UserData *userData = p_state->user_data;
+
+   GLbyte vShaderStr[] =  
+      "attribute vec4 a_position;   \n"
+      "attribute vec2 a_texCoord;   \n"
+      "varying vec2 v_texCoord;     \n"
+      "void main()                  \n"
+      "{                            \n"
+      "   gl_Position = a_position; \n"
+      "   v_texCoord = a_texCoord;  \n"
+      "}                            \n";
+
+   GLbyte fShaderStr_stpq[] =  
+      "precision mediump float;                              \n"
+      "varying vec2 v_texCoord;                              \n"
+      "uniform vec2 texSize;                                 \n"
+      "uniform mat3 yuv2rgb;                                 \n"
+      "uniform sampler2D texture;                            \n"
+      "void main()                                           \n"
+      "{                                                     \n"
+      "  float y, u, v, r, g, b;                             \n"
+      "  float yx, yy, ux, uy, vx, vy;                       \n"
+
+      "  vec2 texCoord=vec2(v_texCoord.x*texSize.x, v_texCoord.y*texSize.y);\n"
+      "  float oe=floor(mod(texCoord.y, 2.0));               \n"
+
+      "  yx=v_texCoord.x;                                    \n"
+      "  yy=v_texCoord.y/2.0;                                \n"
+      "  ux=oe*0.5+v_texCoord.x/2.0;                         \n"
+      "  uy=0.5+v_texCoord.y/4.0;                            \n" //
+      "  vx=ux;                                              \n"
+      "  vy=0.75+v_texCoord.y/4.0;                           \n" //
+
+      "  int x=int(mod(texCoord.x, 8.0));                    \n"
+
+      "  vec4 y4 = vec4(float((x==0)||(x==4)), float((x==1)||(x==5)), float((x==2)||(x==6)), float((x==3)||(x==7))); \n"
+      "  vec4 uv4 = vec4(float((x==0)||(x==1)), float((x==2)||(x==3)), float((x==4)||(x==5)), float((x==6)||(x==7))); \n"
+      "  y=dot(y4,  texture2D(texture, vec2(yx, yy))); \n"
+      "  u=dot(uv4, texture2D(texture, vec2(ux, uy))); \n"
+      "  v=dot(uv4, texture2D(texture, vec2(vx, vy))); \n"
+
+      "  vec3 yuv=vec3(y, u-0.5, v-0.5);                     \n"
+      "  vec3 rgb=yuv*yuv2rgb;                               \n"
+
+      "  gl_FragColor=vec4(rgb, 1.0);                        \n"
+      "}                                                     \n";
+
+   // Load the shaders and get a linked program object
+   userData->programObject = LoadProgram ((char *)vShaderStr, (char *)fShaderStr_stpq );
+   if (!userData->programObject)
+   {
+     printf("Load Program %d\n",userData->programObject);
+     return GL_FALSE;
+   }
+
+   userData->samplerLoc = glGetUniformLocation ( userData->programObject, "texture" );
+
+   // Get the attribute locations
+   userData->positionLoc = glGetAttribLocation ( userData->programObject, "a_position" ); // Query only
+   userData->texCoordLoc = glGetAttribLocation ( userData->programObject, "a_texCoord" );
+   
+   userData->sizeLoc = glGetUniformLocation ( userData->programObject, "texSize" );
+   userData->cmatrixLoc = glGetUniformLocation ( userData->programObject, "yuv2rgb" );
+   
+   // Use the program object
+   glUseProgram ( userData->programObject ); 
+
+   // Load the vertex position
+   glVertexAttribPointer ( userData->positionLoc, 3, GL_FLOAT, 
+                           GL_FALSE, 3 * sizeof(GLfloat), vVertices );
+                           
+   // Load the texture coordinate
+   glVertexAttribPointer ( userData->texCoordLoc, 2, GL_FLOAT,
+                           GL_FALSE, 2 * sizeof(GLfloat), tVertices );
+
+   glEnableVertexAttribArray(userData->positionLoc);
+   glEnableVertexAttribArray(userData->texCoordLoc);
+   
+   glUniform1i(userData->samplerLoc, 0);
+
+/*
+	// Create framebuffer
+	glGenFramebuffers(1, &(userData->canvasFrameBuffer));
+	glBindFramebuffer(GL_RENDERBUFFER, userData->canvasFrameBuffer);
+
+	// Attach renderbuffer
+	glGenRenderbuffers(1, &(userData->canvasRenderBuffer));
+	glBindRenderbuffer(GL_RENDERBUFFER, userData->canvasRenderBuffer);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA4, pCodecCtx->width, pCodecCtx->height);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, userData->canvasRenderBuffer);
+
+	glGenTextures(1, &(userData->outtex));
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, userData->outtex);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLfloat)GL_NEAREST);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLfloat)GL_NEAREST);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLfloat)GL_CLAMP_TO_EDGE);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLfloat)GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,  pCodecCtx->width, pCodecCtx->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, userData->outtex, 0);
+*/
+   glClearColor ( 0.0f, 0.0f, 0.0f, 1.0f );
+   glClear(GL_COLOR_BUFFER_BIT);
+   return GL_TRUE;
+}
+
+int Init(CUBE_STATE_T *p_state, YUVformats fmt)
+{
+	switch(fmt)
+	{
+		case YUV422:
+			return(Init_YUV422(p_state));
+			break;
+		case YUV420:
+		default:
+			return(Init_YUV420(p_state));
+			break;
+	}
 }
 
 void setSize(CUBE_STATE_T *state, int width, int height)

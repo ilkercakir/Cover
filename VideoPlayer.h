@@ -65,8 +65,9 @@ typedef struct
 	SwrContext *swr;
     AVDictionary *optionsDict;
     AVDictionary *optionsDictA;
+	YUVformats yuvfmt;
 
-	int frametime, decodevideo;
+	int frametime, decodevideo, spk_samplingrate;
 	double frame_rate, sample_rate;
 	int64_t now_playing_frame, now_decoding_frame, videoduration, audioduration;
 	long diff1, diff2, diff3, diff4, diff5, diff7, framesskipped;

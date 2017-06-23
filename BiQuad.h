@@ -48,6 +48,7 @@ typedef struct
 	int enabled;
 	int autoleveling;
 	float effgain;
+	float volume;
 }audioequalizer;
 
 typedef struct
@@ -66,6 +67,7 @@ void AudioEqualizer_calcEffectiveGain(audioequalizer *eq);
 void AudioEqualizer_init(audioequalizer *eq, int eqbands, float eqoctave, int eqenabled, int eqautoleveling, snd_pcm_format_t format, unsigned int rate, unsigned int channels, eqdefaults *eqd);
 void AudioEqualizer_setEffectiveGain(audioequalizer *eq, float dbGain);
 void AudioEqualizer_setGain(audioequalizer *eq, int eqband, float dbGain);
+void AudioEqualizer_setVolume(audioequalizer *eq, float vol);
 void AudioEqualizer_setEnabled(audioequalizer *eq, int enabled);
 void AudioEqualizer_setAutoLeveling(audioequalizer *eq, int autoleveling);
 void AudioEqualizer_close(audioequalizer *eq);

@@ -141,6 +141,14 @@ void init_videoplayer(videoplayer *v, int width, int height, int vqMaxLength, in
 
 void close_videoplayer(videoplayer *v)
 {
+	avformat_close_input(&(v->pFormatCtx));
+/*
+	if (v->swr)
+	{
+		swr_close(v->swr);
+		swr_free(&(v->swr));
+	}
+*/
 	vq_destroy(&(v->vpq));
 	pthread_mutex_destroy(&(v->framemutex));
 	pthread_mutex_destroy(&(v->seekmutex));
@@ -163,14 +171,15 @@ void drain_videoplayer(videoplayer *v)
 
 int open_now_playing(videoplayer *v)
 {
-    int i;
+	int i;
+	char err[200];
 
-    /* FFMpeg stuff */
-    v->optionsDict = NULL;
-    v->optionsDictA = NULL;
+	/* FFMpeg stuff */
+	v->optionsDict = NULL;
+	v->optionsDictA = NULL;
 
-    av_register_all();
-    avformat_network_init();
+	av_register_all();
+	avformat_network_init();
 
 	if(avformat_open_input(&(v->pFormatCtx), v->now_playing, NULL, NULL)!=0)
 	{
@@ -185,10 +194,10 @@ int open_now_playing(videoplayer *v)
 		return -1; // Couldn't find stream information
 	}
   
-    // Dump information about file onto standard error
+	// Dump information about file onto standard error
 	//av_dump_format(v->pFormatCtx, 0, v->now_playing, 0);
-  
-    // Find the first video stream
+
+	// Find the first video stream
     v->videoStream=-1;
 	for(i=0; i<v->pFormatCtx->nb_streams; i++)
 	{
@@ -240,6 +249,19 @@ int open_now_playing(videoplayer *v)
 //printf("frametime = %d usec\n", frametime);
 //printf("Width : %d, Height : %d\n", pCodecCtx->width, pCodecCtx->height);
 		v->videoduration = (v->pFormatCtx->duration / AV_TIME_BASE) * v->frame_rate; // in frames
+
+		switch(v->pCodecCtx->pix_fmt)
+		{
+			case AV_PIX_FMT_YUYV422:
+			case AV_PIX_FMT_YUV422P:
+			case AV_PIX_FMT_YUVJ422P:
+				v->yuvfmt = YUV422;
+				break;
+			default:
+				v->yuvfmt = YUV420;
+				break;
+		}
+//printf("Pixel format %d\n", v->pCodecCtx->pix_fmt);
 	}
 
 	v->audioStream = -1;
@@ -279,15 +301,26 @@ int open_now_playing(videoplayer *v)
 
 		// Set up SWR context once you've got codec information
 		v->swr = swr_alloc();
-		av_opt_set_int(v->swr, "in_channel_layout",  v->pCodecCtxA->channel_layout, 0);
-		av_opt_set_int(v->swr, "out_channel_layout", v->pCodecCtxA->channel_layout,  0);
-		av_opt_set_int(v->swr, "in_sample_rate",     v->pCodecCtxA->sample_rate, 0);
-		av_opt_set_int(v->swr, "out_sample_rate",    v->pCodecCtxA->sample_rate, 0);
-		av_opt_set_sample_fmt(v->swr, "in_sample_fmt",  v->pCodecCtxA->sample_fmt, 0);
+/*
+		if (v->pCodecCtxA->channel_layout)
+		{
+			av_opt_set_int(v->swr, "in_channel_layout", v->pCodecCtxA->channel_layout, 0);
+			av_opt_set_int(v->swr, "out_channel_layout", v->pCodecCtxA->channel_layout,  0);
+		}
+*/
+		av_opt_set_int(v->swr, "in_channel_count", v->pCodecCtxA->channels, 0);
+		av_opt_set_int(v->swr, "out_channel_count", 2,  0);
+//printf("%d\n", v->spk_samplingrate);
+		av_opt_set_int(v->swr, "in_sample_rate", v->pCodecCtxA->sample_rate, 0);
+		av_opt_set_int(v->swr, "out_sample_rate", v->spk_samplingrate, 0);
 
+		av_opt_set_sample_fmt(v->swr, "in_sample_fmt", v->pCodecCtxA->sample_fmt, 0);
 		av_opt_set_sample_fmt(v->swr, "out_sample_fmt", AV_SAMPLE_FMT_S16,  0);
-		swr_init(v->swr);
-
+		if ((i=swr_init(v->swr)))
+		{
+			av_strerror(i, err, sizeof(err));
+			printf("swr_init error %d %s\n", i, err);
+		}
 		v->sample_rate = v->pCodecCtxA->sample_rate;
 		v->audioduration = (v->pFormatCtx->duration / AV_TIME_BASE) * v->sample_rate; // in samples
 		//printf("audio frame count %lld\n", audioduration);
@@ -344,8 +377,8 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 	}
 
 	get_first_usec(&vt);
-    while ((av_read_frame(v->pFormatCtx, packet)>=0) && (!v->stoprequested))
-    {
+	while ((av_read_frame(v->pFormatCtx, packet)>=0) && (!v->stoprequested))
+	{
 		v->diff1=get_next_usec(&vt); //printf("av_read_frame %ld\n", v->diff1);
 		//if (!(now_playing_frame%10))
 		//	gdk_threads_add_idle(setLevel1, &diff1);
@@ -403,10 +436,22 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 					}
 					else
 					{
-						rgba = malloc(width * height*3/2);
-						memcpy(&rgba[0], pFrame->data[0], width*height); //y
-						memcpy(&rgba[width*height], pFrame->data[1], width*height/4); //u
-						memcpy(&rgba[width*height*5/4], pFrame->data[2], width*height/4); //v
+						switch(v->yuvfmt)
+						{
+							case YUV422:
+								rgba = malloc(width*height*2);
+								memcpy(&rgba[0], pFrame->data[0], width*height); //y
+								memcpy(&rgba[width*height], pFrame->data[1], width*height/2); //u
+								memcpy(&rgba[width*height*3/2], pFrame->data[2], width*height/2); //v
+								break;
+							case YUV420:
+							default:
+								rgba = malloc(width * height*3/2);
+								memcpy(&rgba[0], pFrame->data[0], width*height); //y
+								memcpy(&rgba[width*height], pFrame->data[1], width*height/4); //u
+								memcpy(&rgba[width*height*5/4], pFrame->data[2], width*height/4); //v
+								break;
+						}
 					}
 
 					pthread_mutex_lock(&(v->framemutex));
@@ -435,11 +480,14 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 //printf("avcodec_decode_audio4\n");
 			if (frameFinished)
 			{
-				ret = av_samples_alloc_array_and_samples(&dst_data, &line_size, v->pCodecCtxA->channels, pFrame->nb_samples, AV_SAMPLE_FMT_S16, 0);
+				//ret = av_samples_alloc_array_and_samples(&dst_data, &line_size, v->pCodecCtxA->channels, pFrame->nb_samples, AV_SAMPLE_FMT_S16, 0);
+				ret = av_samples_alloc_array_and_samples(&dst_data, &line_size, 2, v->spk_samplingrate, AV_SAMPLE_FMT_S16, 0);
 //printf("av_samples_alloc_array_and_samples, %d\n", ret);
-				ret = swr_convert(v->swr, dst_data, pFrame->nb_samples, (const uint8_t **)pFrame->extended_data, pFrame->nb_samples);
+				//ret = swr_convert(v->swr, dst_data, pFrame->nb_samples, (const uint8_t **)pFrame->extended_data, pFrame->nb_samples);
+				ret = swr_convert(v->swr, dst_data, v->spk_samplingrate, (const uint8_t **)pFrame->extended_data, pFrame->nb_samples);
 				if (ret<0) printf("swr_convert error %d\n", ret);
-				dst_bufsize = av_samples_get_buffer_size(NULL, v->pCodecCtxA->channels, ret, AV_SAMPLE_FMT_S16, 0);
+				//dst_bufsize = av_samples_get_buffer_size(NULL, v->pCodecCtxA->channels, ret, AV_SAMPLE_FMT_S16, 0);
+				dst_bufsize = av_samples_get_buffer_size(NULL, 2, ret, AV_SAMPLE_FMT_S16, 0);
 //printf("bufsize=%d\n", dst_bufsize);
 				if (dst_data)
 				{
@@ -522,7 +570,7 @@ void frame_player_loop(videoplayer *v)
 
     //init_ogl(p_state); // Render to screen
     init_ogl2(&state, v->playerWidth, v->playerHeight); // Render to Frame Buffer
-    if (Init(&state) == GL_FALSE)
+    if (Init(&state, v->yuvfmt) == GL_FALSE)
     {
 		printf("Init failed\n");
 		return;
@@ -565,16 +613,34 @@ void frame_player_loop(videoplayer *v)
 		height = v->playerHeight;
 	}
 
-	userData = state.user_data;
-	setSize(&state, width/4, height*3/2);
+	switch(v->yuvfmt)
+	{
+		case YUV422:
+			userData = state.user_data;
+			setSize(&state, width/4, height*2);
 
-	initPixbuf(v);
-	userData->outrgb = (char*)gdk_pixbuf_get_pixels(v->pixbuf);
+			initPixbuf(v);
+			userData->outrgb = (char*)gdk_pixbuf_get_pixels(v->pixbuf);
 
-	GLfloat picSize[2] = { (GLfloat)width, (GLfloat)height*3/2 };
-	glUniform2fv(userData->sizeLoc, 1, picSize);
-	GLfloat yuv2rgbmatrix[9] = { 1.0, 0.0, 1.5958, 1.0, -0.3917, -0.8129, 1.0, 2.017, 0.0 };
-	glUniformMatrix3fv(userData->cmatrixLoc, 1, FALSE, yuv2rgbmatrix);
+			GLfloat picSize422[2] = { (GLfloat)width, (GLfloat)height };
+			glUniform2fv(userData->sizeLoc, 1, picSize422);
+			GLfloat yuv2rgbmatrix422[9] = { 1.0, 0.0, 1.402, 1.0, -0.344, -0.714, 1.0, 1.772, 0.0 }; // YUV422
+			glUniformMatrix3fv(userData->cmatrixLoc, 1, FALSE, yuv2rgbmatrix422);
+			break;
+		case YUV420:
+		default:
+			userData = state.user_data;
+			setSize(&state, width/4, height*3/2);
+
+			initPixbuf(v);
+			userData->outrgb = (char*)gdk_pixbuf_get_pixels(v->pixbuf);
+
+			GLfloat picSize420[2] = { (GLfloat)width, (GLfloat)height*3/2 };
+			glUniform2fv(userData->sizeLoc, 1, picSize420);
+			GLfloat yuv2rgbmatrix420[9] = { 1.0, 0.0, 1.5958, 1.0, -0.3917, -0.8129, 1.0, 2.017, 0.0 }; // YUV420
+			glUniformMatrix3fv(userData->cmatrixLoc, 1, FALSE, yuv2rgbmatrix420);
+			break;
+	}
 
 //printf("player start\n");
 	while ((q=vq_remove(&(v->vpq))))
@@ -607,7 +673,16 @@ void frame_player_loop(videoplayer *v)
 
 
 		get_first_usec(&vt);
-		texImage2D(&state, q->yuv, width/4, height*3/2);
+		switch(v->yuvfmt)
+		{
+			case YUV422:
+				texImage2D(&state, q->yuv, width/4, height*2);
+				break;
+			case YUV420:
+			default:
+				texImage2D(&state, q->yuv, width/4, height*3/2);
+				break;
+		}
 		v->diff3=get_next_usec(&vt);
 //printf("%lu usec glTexImage2D\n", diff3);
 
@@ -643,7 +718,6 @@ void frame_player_loop(videoplayer *v)
 			usleep(0-diff);
 			diff = 0;
 		}
-
 		free(q->yuv);
 		free(q);
 	}

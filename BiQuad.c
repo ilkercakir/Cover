@@ -187,6 +187,8 @@ void AudioEqualizer_init(audioequalizer *eq, int eqbands, float eqoctave, int eq
 	}
 	else
 		eq->effgain = 1.0;
+
+	eq->volume = 1.0;
 }
 
 void AudioEqualizer_setEffectiveGain(audioequalizer *eq, float dbGain)
@@ -207,6 +209,13 @@ void AudioEqualizer_setGain(audioequalizer *eq, int eqband, float dbGain)
 	{
 		AudioEqualizer_calcEffectiveGain(eq);
 	}
+	pthread_mutex_unlock(eq->eqmutex);
+}
+
+void AudioEqualizer_setVolume(audioequalizer *eq, float vol)
+{
+	pthread_mutex_lock(eq->eqmutex);
+	eq->volume = vol;
 	pthread_mutex_unlock(eq->eqmutex);
 }
 
@@ -251,6 +260,7 @@ void AudioEqualizer_BiQuadProcess(audioequalizer *eq, uint8_t *buf, int bufsize)
 	{
 		intp=(signed short *)buf;
 		float preampfactor = eq->effgain;
+		float volumefactor = eq->volume;
 		int samples = bufsize / snd_pcm_format_width(eq->format) * 8;
 		int frames = samples / eq->channels;
 		for (a=0,b=0;a<frames;a++,b+=eq->channels)
@@ -274,6 +284,9 @@ void AudioEqualizer_BiQuadProcess(audioequalizer *eq, uint8_t *buf, int bufsize)
 				for(j=0;j<eq->channels;j++)
 					intp[b+j] *= preampfactor;
 			}
+
+			for(j=0;j<eq->channels;j++) // volume
+				intp[b+j] *= volumefactor;
 		}
 	}
 	pthread_mutex_unlock(eq->eqmutex);

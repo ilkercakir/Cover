@@ -13,6 +13,12 @@
 
 #include <bcm_host.h>
 
+typedef enum
+{
+	YUV420,
+	YUV422
+}YUVformats;
+
 typedef struct
 {
     // Handle to a program object
@@ -63,7 +69,9 @@ void init_ogl2(CUBE_STATE_T *state, int pWidth, int pHeight);
 void close_ogl2(CUBE_STATE_T *state);
 GLuint LoadShader(GLenum type, const char *shaderSrc);
 GLuint LoadProgram(const char *vertShaderSrc, const char *fragShaderSrc);
-int Init(CUBE_STATE_T *state);
+int Init_YUV420(CUBE_STATE_T *state);
+int Init_YUV422(CUBE_STATE_T *p_state);
+int Init(CUBE_STATE_T *state, YUVformats fmt);
 void setSize(CUBE_STATE_T *state, int width, int height);
 void texImage2D(CUBE_STATE_T *state, char* buf, int width, int height);
 void redraw_scene(CUBE_STATE_T *state);

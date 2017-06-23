@@ -285,10 +285,6 @@ int read_mic(microphone *m)
 {
 	pthread_mutex_lock(m->micmutex);
 	int err, result = 1;
-	//snd_pcm_sframes_t frames;
-
-	//frames = snd_pcm_avail(m->capture_handle);
-//printf("available capture frames %ld\n", frames);
 
 	err = snd_pcm_readi(m->capture_handle, m->buffer, m->bufferframes);
 	if (err == -EAGAIN) printf("EAGAIN mic\n");
@@ -348,23 +344,28 @@ snd_pcm_sframes_t discard_mic(microphone *m)
 {
 	int ret, err;
 	char *buf;
+	snd_pcm_sframes_t frames;
 
 	buf = malloc(m->buffersize);
 
 	pthread_mutex_lock(m->micmutex);
-	while (((ret=snd_pcm_avail(m->capture_handle))>=m->bufferframes))
+	for(ret=0;(frames = snd_pcm_avail(m->capture_handle))>m->bufferframes;ret+=frames) // skip
 	{
-printf("mic discarding %d frames\n", m->bufferframes);
-		if ((err = snd_pcm_readi(m->capture_handle, m->buffer, m->bufferframes)) != m->bufferframes)
+		printf("available capture frames %ld\n", frames);
+
+		err = snd_pcm_readi(m->capture_handle, m->buffer, m->bufferframes);
+		if (err == -EAGAIN) printf("EAGAIN mic\n");
+		if (err < 0)
 		{
-			printf("snd_pcm_readi error: %s\n", snd_strerror(err));
-			err=0;
+			if (xrun_recovery(m->capture_handle, err) < 0)
+			{
+				printf("snd_pcm_readi error: %s\n", snd_strerror(err));
+			}
 		}
 	}
 	pthread_mutex_unlock(m->micmutex);
 	
 	free(buf);
-
 	return(ret);
 }
 

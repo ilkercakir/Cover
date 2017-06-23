@@ -1,3 +1,4 @@
+
 /*
  * Cover.c
  * 
@@ -211,8 +212,12 @@ static gpointer recorderthread(gpointer args)
 		g_free(strval);
 		connect_audiojack(queueLength, &jack1, &mx);
 
+		// kick initialize mixer channel
 		memset(mic.mh.sbuffer, 0, mic.mh.sbuffersize);
-		writetojack(mic.mh.sbuffer, mic.mh.sbuffersize, &jack1); // kick initialize mixer channel
+		writetojack(mic.mh.sbuffer, mic.mh.sbuffersize, &jack1);
+		pthread_mutex_lock(jack1.x->xmutex);
+		*(jack1.rear) = *(jack1.front) = 0;
+		pthread_mutex_unlock(jack1.x->xmutex);
 
 		Delay_initAll(&delay1, mx.format, mx.rate, mx.channels);
 		Reverb_initAll(&reverb1, mx.format, mx.rate, mx.channels);
@@ -403,6 +408,8 @@ void terminate_thread0(gpointer data)
 
 static gboolean delete_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 {
+	playlistparams *plp = (playlistparams *)data;
+	press_vp_stop_button(plp);
 	terminate_thread0(data);
 	return FALSE; // return FALSE to emit destroy signal
 }
@@ -960,7 +967,7 @@ int main(int argc, char *argv[])
 
 
 	gtk_widget_show_all(window);
-	init_playlistparams(&plparams, &vpw1, 50, 50); // video, audio
+	init_playlistparams(&plparams, &vpw1, 50, 50, samplingrate); // video, audio, spk_samplingrate
 	init_videoplayerwidgets(&plparams, argc, argv, 800, 450, &mx);
 	create_thread0();
 	vpw_commandline(&plparams, argc);

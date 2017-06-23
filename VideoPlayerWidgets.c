@@ -22,12 +22,77 @@
  */
 
 #include "VideoPlayerWidgets.h"
+char* strreplace(char *src, char *search, char *replace)
+{
+	char *p;
+	char *front;
+	char *dest;
 
-void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, int vqMaxLength, int aqMaxLength)
+	dest = (char*)malloc(1);
+	dest[0] = '\0';
+	for(front = p = src; (p = strstr(p, search)); front = p)
+	{
+		p[0] = '\0';
+		//printf("%s\n", front);
+		dest = (char*)realloc(dest, strlen(dest)+strlen(front)+1);
+		strcat(dest, front);
+
+		dest = (char*)realloc(dest, strlen(dest)+strlen(replace)+1);
+		strcat(dest, replace);
+
+		p += strlen(search);
+	}
+	//printf("%s\n", front);
+	dest = (char*)realloc(dest, strlen(dest)+strlen(front)+1);
+	strcat(dest, front);
+	
+	//printf("\n%s\n", dest);
+	return dest;
+}
+
+char* strlastpart(char *src, char *search, int lowerupper)
+{
+	char *p;
+	char *q;
+	int i;
+
+	q = &src[strlen(src)];
+	for(p = src; (p = strstr(p, search)); p += strlen(search))
+	{
+		q = p;
+	}
+	switch (lowerupper)
+	{
+		case 0:
+			break;
+		case 1:
+			for(i=0;q[i];i++) q[i] = tolower(q[i]);
+			break;
+		case 2:
+			for(i=0;q[i];i++) q[i] = toupper(q[i]);
+			break;
+	}
+	
+	return q;
+}
+
+static int nomediafile(char *filepath)
+{
+	return
+	(
+		strcmp(strlastpart(filepath, ".", 1), ".mp4") &&
+		strcmp(strlastpart(filepath, ".", 1), ".mp3") &&
+		strcmp(strlastpart(filepath, ".", 1), ".mov") &&
+		strcmp(strlastpart(filepath, ".", 1), ".mkv")
+	);
+}
+
+void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, int vqMaxLength, int aqMaxLength, int spk_samplingrate)
 {
 	plparams->vpw = vpw;
 	plparams->vqMaxLength = vqMaxLength;
 	plparams->aqMaxLength = aqMaxLength;
+	plparams->spk_samplingrate = spk_samplingrate;
 }
 
 void close_playlistparams(playlistparams *plparams)
@@ -128,6 +193,51 @@ gboolean set_upper(gpointer data)
 	return FALSE;
 }
 
+gboolean statusbar_msg(gpointer data)
+{
+	vpwidgets *vpw = (vpwidgets *)data;
+	videoplayer *v = &(vpw->vp);
+
+	char msgtext[256];
+	char *txt;
+	int pos;
+	gtk_statusbar_pop(GTK_STATUSBAR(vpw->statusbar), vpw->context_id);
+	if (v->videoduration)
+	{
+		txt = strlastpart(v->now_playing, "/", 0);
+		pos = strlen(txt);
+		strcpy(msgtext, txt);
+		if (pos>70)
+		{
+			msgtext[30] = '\0';
+			strcat(msgtext, "...");
+			pos -= 30;
+			strcat(msgtext, txt+pos);
+		}
+		sprintf(vpw->msg, "%2.2f fps, %d*%d, %s (%02i:%02i)", v->frame_rate, v->pCodecCtx->width, v->pCodecCtx->height, msgtext, ((int)(v->videoduration/v->frame_rate))/60, ((int)(v->videoduration/v->frame_rate)%60));
+	}
+	else
+	{
+		txt = strlastpart(v->now_playing, "/", 0);
+		pos = strlen(txt);
+		strcpy(msgtext, txt);
+		if (pos>100)
+		{
+			msgtext[45] = '\0';
+			strcat(msgtext, "...");
+			pos -= 45;
+			strcat(msgtext, txt+pos);
+		}
+		sprintf(vpw->msg, "%s (%02i:%02i)", msgtext, ((int)(v->audioduration/v->sample_rate))/60, ((int)(v->audioduration/v->sample_rate)%60));
+	}
+//printf("%s\n", msg);
+	gchar *buff = g_strdup_printf("%s", vpw->msg);
+	gtk_statusbar_push(GTK_STATUSBAR(vpw->statusbar), vpw->context_id, buff);
+	g_free(buff);
+
+	return FALSE;
+}
+
 int create_thread0_videoplayer(vpwidgets *vpw, int vqMaxLength, int aqMaxLength)
 {
 	videoplayer *v = &(vpw->vp);
@@ -156,6 +266,9 @@ int create_thread0_videoplayer(vpwidgets *vpw, int vqMaxLength, int aqMaxLength)
 	if ((err=pthread_setaffinity_np(v->tid[0], sizeof(cpu_set_t), &(v->cpu[0]))))
 		printf("pthread_setaffinity_np error %d\n", err);
 */
+
+	gdk_threads_add_idle(statusbar_msg, (void*)vpw);
+
 	int i;
 	if ((i=pthread_join(v->tid[0], NULL)))
 		printf("pthread_join error, v->tid[0], %d\n", i);
@@ -373,71 +486,6 @@ static void button4_clicked(GtkWidget *button, gpointer data)
 	g_object_unref(model);
 	model = create_and_fill_model(vpw, 1, 0, NULL); // insert rows
 	gtk_tree_view_set_model(GTK_TREE_VIEW(vpw->listview), model); /* Re-attach model to view */
-}
-
-char* strreplace(char *src, char *search, char *replace)
-{
-	char *p;
-	char *front;
-	char *dest;
-
-	dest = (char*)malloc(1);
-	dest[0] = '\0';
-	for(front = p = src; (p = strstr(p, search)); front = p)
-	{
-		p[0] = '\0';
-		//printf("%s\n", front);
-		dest = (char*)realloc(dest, strlen(dest)+strlen(front)+1);
-		strcat(dest, front);
-
-		dest = (char*)realloc(dest, strlen(dest)+strlen(replace)+1);
-		strcat(dest, replace);
-
-		p += strlen(search);
-	}
-	//printf("%s\n", front);
-	dest = (char*)realloc(dest, strlen(dest)+strlen(front)+1);
-	strcat(dest, front);
-	
-	//printf("\n%s\n", dest);
-	return dest;
-}
-
-char* strlastpart(char *src, char *search, int lowerupper)
-{
-	char *p;
-	char *q;
-	int i;
-
-	q = &src[strlen(src)];
-	for(p = src; (p = strstr(p, search)); p += strlen(search))
-	{
-		q = p;
-	}
-	switch (lowerupper)
-	{
-		case 0:
-			break;
-		case 1:
-			for(i=0;q[i];i++) q[i] = tolower(q[i]);
-			break;
-		case 2:
-			for(i=0;q[i];i++) q[i] = toupper(q[i]);
-			break;
-	}
-	
-	return q;
-}
-
-static int nomediafile(char *filepath)
-{
-	return
-	(
-		strcmp(strlastpart(filepath, ".", 1), ".mp4") &&
-		strcmp(strlastpart(filepath, ".", 1), ".mp3") &&
-		strcmp(strlastpart(filepath, ".", 1), ".mov") &&
-		strcmp(strlastpart(filepath, ".", 1), ".mkv")
-	);
 }
 
 void listdir(const char *name, sqlite3 *db, int *id)
@@ -661,8 +709,8 @@ static void button7_clicked(GtkWidget *button, gpointer data)
 // success
 				}
 			}
-			button3_clicked(vpw->button3, vpw);
-			button4_clicked(vpw->button4, vpw);
+			button3_clicked(vpw->button3, plp);
+			button4_clicked(vpw->button4, plp);
 		}
 		sqlite3_close(db);
 	}
@@ -715,6 +763,36 @@ static void button10_clicked(GtkWidget *button, gpointer data)
 	}
 }
 
+static void button11_clicked(GtkWidget *button, gpointer data)
+{
+	playlistparams *plp = (playlistparams*)data;
+	vpwidgets *vpw = plp->vpw;
+
+	GtkWidget *dialog;
+	GtkFileChooserAction action = GTK_FILE_CHOOSER_ACTION_OPEN;
+	GSList *chosenfile;
+
+	int i=0;
+
+	dialog = gtk_file_chooser_dialog_new("Open File", GTK_WINDOW(vpw->vpwindow), action, "Cancel", GTK_RESPONSE_CANCEL, "Open", GTK_RESPONSE_ACCEPT, NULL);
+	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
+	gtk_file_chooser_set_select_multiple(chooser, TRUE);
+	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT)
+	{
+		button3_clicked(vpw->button3, plp);
+		GSList *filelist = gtk_file_chooser_get_filenames(chooser);
+		for(chosenfile=filelist;chosenfile;chosenfile=chosenfile->next)
+		{
+			if (nomediafile((char*)chosenfile->data))
+				continue;
+//printf("%s\n", (char*)chosenfile->data);
+			gtk_list_store_append(vpw->store, &(vpw->iter));
+			gtk_list_store_set(vpw->store, &(vpw->iter), COL_ID, i++, COL_FILEPATH, chosenfile->data, -1);
+		}
+	}
+	gtk_widget_destroy(dialog);
+}
+
 static void vscale0(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
@@ -723,7 +801,7 @@ static void vscale0(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 0, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscale1(GtkWidget *widget, gpointer data)
@@ -734,7 +812,7 @@ static void vscale1(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 1, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscale2(GtkWidget *widget, gpointer data)
@@ -745,7 +823,7 @@ static void vscale2(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 2, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscale3(GtkWidget *widget, gpointer data)
@@ -756,7 +834,7 @@ static void vscale3(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 3, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscale4(GtkWidget *widget, gpointer data)
@@ -767,7 +845,7 @@ static void vscale4(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 4, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscale5(GtkWidget *widget, gpointer data)
@@ -778,7 +856,7 @@ static void vscale5(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 5, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscale6(GtkWidget *widget, gpointer data)
@@ -789,7 +867,7 @@ static void vscale6(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 6, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscale7(GtkWidget *widget, gpointer data)
@@ -800,7 +878,7 @@ static void vscale7(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 7, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscale8(GtkWidget *widget, gpointer data)
@@ -811,7 +889,7 @@ static void vscale8(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 8, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscale9(GtkWidget *widget, gpointer data)
@@ -822,16 +900,25 @@ static void vscale9(GtkWidget *widget, gpointer data)
 //    printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setGain(&(vpw->ae), 9, value);
 	if (vpw->ae.autoleveling)
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 }
 
 static void vscaleA(GtkWidget *widget, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
 
-	float value = 16.0 - gtk_range_get_value(GTK_RANGE(widget));
+	float value = 4.0 - gtk_range_get_value(GTK_RANGE(widget));
 //	printf("Adjustment value: %f\n", value);
 	AudioEqualizer_setEffectiveGain(&(vpw->ae), value);
+}
+
+static void vscaleV(GtkWidget *widget, gpointer data)
+{
+	vpwidgets *vpw = (vpwidgets*)data;
+
+	float value = 1.0 - gtk_range_get_value(GTK_RANGE(widget));
+//	printf("Adjustment value: %f\n", value);
+	AudioEqualizer_setVolume(&(vpw->ae), value);
 }
 
 gchar* scale_valueformat(GtkScale *scale, gdouble value, gpointer user_data)
@@ -841,7 +928,12 @@ gchar* scale_valueformat(GtkScale *scale, gdouble value, gpointer user_data)
 
 gchar* scale_valuepreamp(GtkScale *scale, gdouble value, gpointer user_data)
 {
-	return g_strdup_printf("%0.2f", 16.0-value);
+	return g_strdup_printf("%0.2f", 4.0-value);
+}
+
+gchar* scale_valuevolume(GtkScale *scale, gdouble value, gpointer user_data)
+{
+	return g_strdup_printf("%0.2f", 1.0-value);
 }
 
 static void eq_toggled(GtkWidget *togglebutton, gpointer data)
@@ -1004,7 +1096,7 @@ int select_eqpreset_callback(void *data, int argc, char **argv, char **azColName
 
 	if (vpw->ae.autoleveling)
 	{
-		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 16.0-vpw->ae.effgain);
+		gtk_range_set_value(GTK_RANGE(vpw->vscaleeqA), 4.0-vpw->ae.effgain);
 	}
 
 	return 0;
@@ -1216,42 +1308,6 @@ void setDrawingArea(vpwidgets *vpw)
 	vpw->vp.pixbuf = NULL;
 	initPixbuf(&(vpw->vp));
 }
-/*
-gboolean invalidate(gpointer data)
-{
-	vpwidgets *vpw = (vpwidgets*)data;
-
-	GdkWindow *dawin = gtk_widget_get_window(vpw->dwgarea);
-	cairo_region_t *region = gdk_window_get_clip_region(dawin);
-	gdk_window_invalidate_region (dawin, region, TRUE);
-	//gdk_window_process_updates (dawin, TRUE);
-	cairo_region_destroy(region);
-	return FALSE;
-}
-
-void destroynotify(guchar *pixels, gpointer data)
-{
-//printf("destroy notify\n");
-	free(pixels);
-}
-
-void initPixbuf(vpwidgets *vpw)
-{
-	int i;
-
-	guchar *imgdata = malloc(vpw->playerWidth*vpw->playerHeight*4); // RGBA
-	for(i=0;i<vpw->playerWidth*vpw->playerHeight;i++)
-	{
-		((unsigned int *)imgdata)[i]=0xFF000000; // ABGR
-	}
-	g_mutex_lock(&(vpw->pixbufmutex));
-	if (vpw->pixbuf)
-		g_object_unref(vpw->pixbuf);
-    vpw->pixbuf = gdk_pixbuf_new_from_data(imgdata, GDK_COLORSPACE_RGB, TRUE, 8, vpw->playerWidth, vpw->playerHeight, vpw->playerWidth*4, destroynotify, NULL);
-	g_mutex_unlock(&(vpw->pixbufmutex));
-	gdk_threads_add_idle(invalidate, vpw);
-}
-*/
 
 void resize_containers(vpwidgets *vpw)
 {
@@ -1262,17 +1318,18 @@ void resize_containers(vpwidgets *vpw)
 	//printf("Scale height %d\n", scaleheight);
 	gtk_widget_set_size_request(vpw->scrolled_window, vpw->playerWidth, vpw->playerHeight+scaleheight);
 
-	gtk_widget_set_size_request(vpw->vscaleeq0, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeq1, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeq2, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeq3, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeq4, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeq5, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeq6, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeq7, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeq8, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeq9, vpw->playerWidth/12, vpw->playerHeight);
-	gtk_widget_set_size_request(vpw->vscaleeqA, vpw->playerWidth/12, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq0, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq1, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq2, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq3, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq4, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq5, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq6, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq7, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq8, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeq9, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeqA, vpw->playerWidth/13, vpw->playerHeight);
+	gtk_widget_set_size_request(vpw->vscaleeqV, vpw->playerWidth/13, vpw->playerHeight);
 }
 
 /* Called when the windows are realized */
@@ -1335,6 +1392,7 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
 	vpw->vp.now_playing = NULL; // Video Player
 	vpw->vp.vpq.playerstatus = IDLE;
 	vpw->vp.vpwp = (void*)vpw;
+	vpw->vp.spk_samplingrate = plp->spk_samplingrate;
 
 	vpw->playerWidth = playWidth;
 	vpw->playerHeight = playHeight;
@@ -1347,61 +1405,61 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
 	}
 
     /* create a new window */
-    vpw->vpwindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_position(GTK_WINDOW(vpw->vpwindow), GTK_WIN_POS_CENTER);
-    /* Sets the border width of the window. */
-    gtk_container_set_border_width (GTK_CONTAINER (vpw->vpwindow), 2);
+	vpw->vpwindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	gtk_window_set_position(GTK_WINDOW(vpw->vpwindow), GTK_WIN_POS_CENTER);
+	/* Sets the border width of the window. */
+	gtk_container_set_border_width (GTK_CONTAINER (vpw->vpwindow), 2);
 	gtk_widget_set_size_request(vpw->vpwindow, 100, 100);
 	gtk_window_set_title(GTK_WINDOW(vpw->vpwindow), "Video Player");
 	gtk_window_set_resizable(GTK_WINDOW(vpw->vpwindow), FALSE);
 
-    /* When the window is given the "delete-event" signal (this is given
+	/* When the window is given the "delete-event" signal (this is given
      * by the window manager, usually by the "close" option, or on the
      * titlebar), we ask it to call the delete_event () function
      * as defined above. The data passed to the callback
      * function is NULL and is ignored in the callback function. */
-    g_signal_connect(vpw->vpwindow, "delete-event", G_CALLBACK (vp_delete_event), (void*)vpw);
+	g_signal_connect(vpw->vpwindow, "delete-event", G_CALLBACK (vp_delete_event), (void*)vpw);
     
-    /* Here we connect the "destroy" event to a signal handler.  
+	/* Here we connect the "destroy" event to a signal handler.  
      * This event occurs when we call gtk_widget_destroy() on the window,
      * or if we return FALSE in the "delete-event" callback. */
-    g_signal_connect(vpw->vpwindow, "destroy", G_CALLBACK(vp_destroy), (void*)vpw);
+	g_signal_connect(vpw->vpwindow, "destroy", G_CALLBACK(vp_destroy), (void*)vpw);
 
-    g_signal_connect(vpw->vpwindow, "realize", G_CALLBACK (vp_realize_cb), (void*)vpw);
+	g_signal_connect(vpw->vpwindow, "realize", G_CALLBACK (vp_realize_cb), (void*)vpw);
 //printf("realized\n");
 
 // vertical box
-    vpw->playerbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->vpwindow), vpw->playerbox);
+	vpw->playerbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->vpwindow), vpw->playerbox);
 
 // box1 contents begin
 // vertical box
-    vpw->box1 = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
+	vpw->box1 = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
     //gtk_container_add(GTK_CONTAINER(window), box1);
 
 // drawing area
-    vpw->dwgarea = gtk_drawing_area_new();
-    gtk_widget_set_size_request(vpw->dwgarea, vpw->playerWidth, vpw->playerHeight);
-    //gtk_widget_set_size_request (dwgarea, 1280, 720);
-    gtk_container_add(GTK_CONTAINER(vpw->box1), vpw->dwgarea);
-    // Signals used to handle the backing surface
-    g_signal_connect(vpw->dwgarea, "draw", G_CALLBACK(draw_cb), (void*)vpw);
-    gtk_widget_set_app_paintable(vpw->dwgarea, TRUE);
+	vpw->dwgarea = gtk_drawing_area_new();
+	gtk_widget_set_size_request(vpw->dwgarea, vpw->playerWidth, vpw->playerHeight);
+	//gtk_widget_set_size_request (dwgarea, 1280, 720);
+	gtk_container_add(GTK_CONTAINER(vpw->box1), vpw->dwgarea);
+	// Signals used to handle the backing surface
+	g_signal_connect(vpw->dwgarea, "draw", G_CALLBACK(draw_cb), (void*)vpw);
+	gtk_widget_set_app_paintable(vpw->dwgarea, TRUE);
 
 	setDrawingArea(vpw); // pass drawing area and initialize pixbuf
 
 // horizontal scale
-    vpw->hadjustment = gtk_adjustment_new(50, 0, 100, 1, 10, 0);
-    vpw->hscale = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL, GTK_ADJUSTMENT(vpw->hadjustment));
-    gtk_scale_set_digits(GTK_SCALE(vpw->hscale), 0);
-    //g_signal_connect(hscale, "value-changed", G_CALLBACK(hscale_adjustment), NULL);
-    g_signal_connect(vpw->hscale, "button-press-event", G_CALLBACK(scale_pressed), (void*)vpw);
-    g_signal_connect(vpw->hscale, "button-release-event", G_CALLBACK(scale_released), (void*)vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->box1), vpw->hscale);
+	vpw->hadjustment = gtk_adjustment_new(50, 0, 100, 1, 10, 0);
+	vpw->hscale = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL, GTK_ADJUSTMENT(vpw->hadjustment));
+	gtk_scale_set_digits(GTK_SCALE(vpw->hscale), 0);
+	//g_signal_connect(hscale, "value-changed", G_CALLBACK(hscale_adjustment), NULL);
+	g_signal_connect(vpw->hscale, "button-press-event", G_CALLBACK(scale_pressed), (void*)vpw);
+	g_signal_connect(vpw->hscale, "button-release-event", G_CALLBACK(scale_released), (void*)vpw);
+	gtk_container_add(GTK_CONTAINER(vpw->box1), vpw->hscale);
 
 // horizontal box
-    vpw->horibox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->box1), vpw->horibox);
+	vpw->horibox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->box1), vpw->horibox);
 
 // horizontal button box
     vpw->button_box = gtk_button_box_new (GTK_ORIENTATION_HORIZONTAL);
@@ -1409,72 +1467,77 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
     gtk_container_add(GTK_CONTAINER(vpw->horibox), vpw->button_box);
 
 // button prev
-    vpw->button9 = gtk_button_new_with_label("Prev");
-    gtk_widget_set_sensitive (vpw->button9, FALSE);
-    g_signal_connect(GTK_BUTTON(vpw->button9), "clicked", G_CALLBACK(button9_clicked), plp);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button9);
+	vpw->button9 = gtk_button_new_with_label("Prev");
+	gtk_widget_set_sensitive (vpw->button9, FALSE);
+	g_signal_connect(GTK_BUTTON(vpw->button9), "clicked", G_CALLBACK(button9_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button9);
 
 // button play
-    vpw->button1 = gtk_button_new_with_label("Play");
-    g_signal_connect(GTK_BUTTON(vpw->button1), "clicked", G_CALLBACK(button1_clicked), plp);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button1);
+	vpw->button1 = gtk_button_new_with_label("Play");
+	g_signal_connect(GTK_BUTTON(vpw->button1), "clicked", G_CALLBACK(button1_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button1);
 
 // button pause/resume
-    vpw->button10 = gtk_button_new_with_label("Pause");
-    gtk_widget_set_sensitive (vpw->button10, FALSE);
-    g_signal_connect(GTK_BUTTON(vpw->button10), "clicked", G_CALLBACK(button10_clicked), plp);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button10);
+	vpw->button10 = gtk_button_new_with_label("Pause");
+	gtk_widget_set_sensitive (vpw->button10, FALSE);
+	g_signal_connect(GTK_BUTTON(vpw->button10), "clicked", G_CALLBACK(button10_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button10);
 
 // button next
-    vpw->button8 = gtk_button_new_with_label("Next");
-    gtk_widget_set_sensitive (vpw->button8, FALSE);
-    g_signal_connect(GTK_BUTTON(vpw->button8), "clicked", G_CALLBACK(button8_clicked), plp);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button8);
+	vpw->button8 = gtk_button_new_with_label("Next");
+	gtk_widget_set_sensitive (vpw->button8, FALSE);
+	g_signal_connect(GTK_BUTTON(vpw->button8), "clicked", G_CALLBACK(button8_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button8);
 
 // button stop
-    vpw->button2 = gtk_button_new_with_label("Stop");
-    gtk_widget_set_sensitive(vpw->button2, FALSE);
-    g_signal_connect(GTK_BUTTON(vpw->button2), "clicked", G_CALLBACK(button2_clicked), plp);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button2);
+	vpw->button2 = gtk_button_new_with_label("Stop");
+	gtk_widget_set_sensitive(vpw->button2, FALSE);
+	g_signal_connect(GTK_BUTTON(vpw->button2), "clicked", G_CALLBACK(button2_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->button2);
 
 // button Parameters
-    vpw->buttonParameters = gtk_button_new_with_label("AV");
-    g_signal_connect(GTK_BUTTON(vpw->buttonParameters), "clicked", G_CALLBACK(buttonParameters_clicked), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->buttonParameters);
+	vpw->buttonParameters = gtk_button_new_with_label("AV");
+	g_signal_connect(GTK_BUTTON(vpw->buttonParameters), "clicked", G_CALLBACK(buttonParameters_clicked), vpw);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box), vpw->buttonParameters);
 // box1 contents end
 
 // box2 contents begin
-    vpw->box2 = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
+	vpw->box2 = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
 
-    vpw->scrolled_window = gtk_scrolled_window_new(NULL, NULL);
-    gtk_container_set_border_width(GTK_CONTAINER(vpw->scrolled_window), 10);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(vpw->scrolled_window), GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
-    gtk_widget_set_size_request(vpw->scrolled_window, vpw->playerWidth, vpw->playerHeight);
-    gtk_container_add(GTK_CONTAINER(vpw->box2), vpw->scrolled_window);
+	vpw->scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+	gtk_container_set_border_width(GTK_CONTAINER(vpw->scrolled_window), 10);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(vpw->scrolled_window), GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
+	gtk_widget_set_size_request(vpw->scrolled_window, vpw->playerWidth, vpw->playerHeight);
+	gtk_container_add(GTK_CONTAINER(vpw->box2), vpw->scrolled_window);
 
-    vpw->listview = create_view_and_model(vpw, argc, argv);
-    g_signal_connect(vpw->listview, "row-activated", (GCallback)listview_onRowActivated, plp);
-    gtk_container_add(GTK_CONTAINER(vpw->scrolled_window), vpw->listview);
+	vpw->listview = create_view_and_model(vpw, argc, argv);
+	g_signal_connect(vpw->listview, "row-activated", (GCallback)listview_onRowActivated, plp);
+	gtk_container_add(GTK_CONTAINER(vpw->scrolled_window), vpw->listview);
 
-    vpw->button_box2 = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_button_box_set_layout((GtkButtonBox*)vpw->button_box2, GTK_BUTTONBOX_START);
-    gtk_container_add(GTK_CONTAINER(vpw->box2), vpw->button_box2);
+	vpw->button_box2 = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
+	gtk_button_box_set_layout((GtkButtonBox*)vpw->button_box2, GTK_BUTTONBOX_START);
+	gtk_container_add(GTK_CONTAINER(vpw->box2), vpw->button_box2);
 
-    vpw->button3 = gtk_button_new_with_label("Clear");
-    g_signal_connect(GTK_BUTTON(vpw->button3), "clicked", G_CALLBACK(button3_clicked), plp);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button3);
+	vpw->button3 = gtk_button_new_with_label("Clear");
+	g_signal_connect(GTK_BUTTON(vpw->button3), "clicked", G_CALLBACK(button3_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button3);
 
-    vpw->button6 = gtk_button_new_with_label("Catalog");
-    g_signal_connect(GTK_BUTTON(vpw->button6), "clicked", G_CALLBACK(button6_clicked), plp);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button6);
+	vpw->button6 = gtk_button_new_with_label("Catalog");
+	g_signal_connect(GTK_BUTTON(vpw->button6), "clicked", G_CALLBACK(button6_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button6);
 
-    vpw->button7 = gtk_button_new_with_label("Add File");
-    g_signal_connect(GTK_BUTTON(vpw->button7), "clicked", G_CALLBACK(button7_clicked), plp);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button7);
+	vpw->button7 = gtk_button_new_with_label("Add File");
+	g_signal_connect(GTK_BUTTON(vpw->button7), "clicked", G_CALLBACK(button7_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button7);
 
-    vpw->button4 = gtk_button_new_with_label("Load");
-    g_signal_connect(GTK_BUTTON(vpw->button4), "clicked", G_CALLBACK(button4_clicked), plp);
-    gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button4);
+	vpw->button4 = gtk_button_new_with_label("Load");
+	g_signal_connect(GTK_BUTTON(vpw->button4), "clicked", G_CALLBACK(button4_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button4);
+
+	vpw->button11 = gtk_button_new_with_label("Open Files");
+	g_signal_connect(GTK_BUTTON(vpw->button11), "clicked", G_CALLBACK(button11_clicked), plp);
+	gtk_container_add(GTK_CONTAINER(vpw->button_box2), vpw->button11);
+
 // box2 contents end
 
 
@@ -1482,147 +1545,159 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
 	AudioEqualizer_init(&(vpw->ae), 10, 1.0, 1, 1, SND_PCM_FORMAT_S16, 44100, 2, &(vpw->aedef));
 // eqvbox contents begin
 // vertical box
-    vpw->eqvbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	vpw->eqvbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
 
 // horizontal box    
-    vpw->eqbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqvbox), vpw->eqbox);
+	vpw->eqbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqvbox), vpw->eqbox);
 
 // vertical scale 0
-    vpw->eqbox0 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox0);
-    vpw->vadj0 = gtk_adjustment_new(vpw->aedef.dbGains[0], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq0 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj0));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq0), 1);
-    g_signal_connect(vpw->vscaleeq0, "value-changed", G_CALLBACK(vscale0), vpw);
+	vpw->eqbox0 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox0);
+	vpw->vadj0 = gtk_adjustment_new(vpw->aedef.dbGains[0], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq0 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj0));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq0), 1);
+	g_signal_connect(vpw->vscaleeq0, "value-changed", G_CALLBACK(vscale0), vpw);
 	g_signal_connect(vpw->vscaleeq0, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox0), vpw->vscaleeq0);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox0), vpw->vscaleeq0);
 	vpw->eqlabel0 = gtk_label_new(vpw->aedef.eqlabels[0]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox0), vpw->eqlabel0);
 
 // vertical scale 1
-    vpw->eqbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox1);
-    vpw->vadj1 = gtk_adjustment_new(vpw->aedef.dbGains[1], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq1 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj1));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq1), 1);
-    g_signal_connect(vpw->vscaleeq1, "value-changed", G_CALLBACK(vscale1), vpw);
+	vpw->eqbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox1);
+	vpw->vadj1 = gtk_adjustment_new(vpw->aedef.dbGains[1], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq1 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj1));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq1), 1);
+	g_signal_connect(vpw->vscaleeq1, "value-changed", G_CALLBACK(vscale1), vpw);
 	g_signal_connect(vpw->vscaleeq1, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox1), vpw->vscaleeq1);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox1), vpw->vscaleeq1);
 	vpw->eqlabel1 = gtk_label_new(vpw->aedef.eqlabels[1]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox1), vpw->eqlabel1);
 
 // vertical scale 2
-    vpw->eqbox2 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox2);
-    vpw->vadj2 = gtk_adjustment_new(vpw->aedef.dbGains[2], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq2 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj2));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq2), 1);
-    g_signal_connect(vpw->vscaleeq2, "value-changed", G_CALLBACK(vscale2), vpw);
+	vpw->eqbox2 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox2);
+	vpw->vadj2 = gtk_adjustment_new(vpw->aedef.dbGains[2], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq2 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj2));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq2), 1);
+	g_signal_connect(vpw->vscaleeq2, "value-changed", G_CALLBACK(vscale2), vpw);
 	g_signal_connect(vpw->vscaleeq2, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox2), vpw->vscaleeq2);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox2), vpw->vscaleeq2);
 	vpw->eqlabel2 = gtk_label_new(vpw->aedef.eqlabels[2]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox2), vpw->eqlabel2);
 
 // vertical scale 3
-    vpw->eqbox3 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox3);
-    vpw->vadj3 = gtk_adjustment_new(vpw->aedef.dbGains[3], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq3 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj3));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq3), 1);
-    g_signal_connect(vpw->vscaleeq3, "value-changed", G_CALLBACK(vscale3), vpw);
+	vpw->eqbox3 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox3);
+	vpw->vadj3 = gtk_adjustment_new(vpw->aedef.dbGains[3], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq3 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj3));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq3), 1);
+	g_signal_connect(vpw->vscaleeq3, "value-changed", G_CALLBACK(vscale3), vpw);
 	g_signal_connect(vpw->vscaleeq3, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox3), vpw->vscaleeq3);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox3), vpw->vscaleeq3);
 	vpw->eqlabel3 = gtk_label_new(vpw->aedef.eqlabels[3]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox3), vpw->eqlabel3);
 
 // vertical scale 4
-    vpw->eqbox4 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox4);
-    vpw->vadj4 = gtk_adjustment_new(vpw->aedef.dbGains[4], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq4 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj4));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq4), 1);
-    g_signal_connect(vpw->vscaleeq4, "value-changed", G_CALLBACK(vscale4), vpw);
+	vpw->eqbox4 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox4);
+	vpw->vadj4 = gtk_adjustment_new(vpw->aedef.dbGains[4], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq4 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj4));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq4), 1);
+	g_signal_connect(vpw->vscaleeq4, "value-changed", G_CALLBACK(vscale4), vpw);
 	g_signal_connect(vpw->vscaleeq4, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox4), vpw->vscaleeq4);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox4), vpw->vscaleeq4);
 	vpw->eqlabel4 = gtk_label_new(vpw->aedef.eqlabels[4]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox4), vpw->eqlabel4);
 
 // vertical scale 5
-    vpw->eqbox5 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox5);
-    vpw->vadj5 = gtk_adjustment_new(vpw->aedef.dbGains[5], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq5 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj5));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq5), 1);
-    g_signal_connect(vpw->vscaleeq5, "value-changed", G_CALLBACK(vscale5), vpw);
+	vpw->eqbox5 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox5);
+	vpw->vadj5 = gtk_adjustment_new(vpw->aedef.dbGains[5], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq5 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj5));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq5), 1);
+	g_signal_connect(vpw->vscaleeq5, "value-changed", G_CALLBACK(vscale5), vpw);
 	g_signal_connect(vpw->vscaleeq5, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox5), vpw->vscaleeq5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox5), vpw->vscaleeq5);
 	vpw->eqlabel5 = gtk_label_new(vpw->aedef.eqlabels[5]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox5), vpw->eqlabel5);
 
 // vertical scale 6
-    vpw->eqbox6 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox6);
-    vpw->vadj6 = gtk_adjustment_new(vpw->aedef.dbGains[6], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq6 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj6));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq6), 1);
-    g_signal_connect(vpw->vscaleeq6, "value-changed", G_CALLBACK(vscale6), vpw);
+	vpw->eqbox6 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox6);
+	vpw->vadj6 = gtk_adjustment_new(vpw->aedef.dbGains[6], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq6 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj6));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq6), 1);
+	g_signal_connect(vpw->vscaleeq6, "value-changed", G_CALLBACK(vscale6), vpw);
 	g_signal_connect(vpw->vscaleeq6, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox6), vpw->vscaleeq6);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox6), vpw->vscaleeq6);
 	vpw->eqlabel6 = gtk_label_new(vpw->aedef.eqlabels[6]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox6), vpw->eqlabel6);
 
 // vertical scale 7
-    vpw->eqbox7 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox7);
-    vpw->vadj7 = gtk_adjustment_new(vpw->aedef.dbGains[7], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq7 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj7));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq7), 1);
-    g_signal_connect(vpw->vscaleeq7, "value-changed", G_CALLBACK(vscale7), vpw);
+	vpw->eqbox7 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox7);
+	vpw->vadj7 = gtk_adjustment_new(vpw->aedef.dbGains[7], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq7 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj7));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq7), 1);
+	g_signal_connect(vpw->vscaleeq7, "value-changed", G_CALLBACK(vscale7), vpw);
 	g_signal_connect(vpw->vscaleeq7, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox7), vpw->vscaleeq7);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox7), vpw->vscaleeq7);
 	vpw->eqlabel7 = gtk_label_new(vpw->aedef.eqlabels[7]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox7), vpw->eqlabel7);
 
 // vertical scale 8
-    vpw->eqbox8 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox8);
-    vpw->vadj8 = gtk_adjustment_new(vpw->aedef.dbGains[8], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq8 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj8));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq8), 1);
-    g_signal_connect(vpw->vscaleeq8, "value-changed", G_CALLBACK(vscale8), vpw);
+	vpw->eqbox8 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox8);
+	vpw->vadj8 = gtk_adjustment_new(vpw->aedef.dbGains[8], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq8 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj8));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq8), 1);
+	g_signal_connect(vpw->vscaleeq8, "value-changed", G_CALLBACK(vscale8), vpw);
 	g_signal_connect(vpw->vscaleeq8, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox8), vpw->vscaleeq8);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox8), vpw->vscaleeq8);
 	vpw->eqlabel8 = gtk_label_new(vpw->aedef.eqlabels[8]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox8), vpw->eqlabel8);
 
 // vertical scale 9
-    vpw->eqbox9 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox9);
-    vpw->vadj9 = gtk_adjustment_new(vpw->aedef.dbGains[9], -12, 12, 0.1, 1, 0);
-    vpw->vscaleeq9 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj9));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq9), 1);
-    g_signal_connect(vpw->vscaleeq9, "value-changed", G_CALLBACK(vscale9), vpw);
+	vpw->eqbox9 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqbox9);
+	vpw->vadj9 = gtk_adjustment_new(vpw->aedef.dbGains[9], -12, 12, 0.1, 1, 0);
+	vpw->vscaleeq9 = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadj9));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeq9), 1);
+	g_signal_connect(vpw->vscaleeq9, "value-changed", G_CALLBACK(vscale9), vpw);
 	g_signal_connect(vpw->vscaleeq9, "format-value", G_CALLBACK(scale_valueformat), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox9), vpw->vscaleeq9);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox9), vpw->vscaleeq9);
 	vpw->eqlabel9 = gtk_label_new(vpw->aedef.eqlabels[9]);
 	gtk_container_add(GTK_CONTAINER(vpw->eqbox9), vpw->eqlabel9);
 
 // vertical scale preamp
-    vpw->eqboxA = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqboxA);
-    vpw->vadjA = gtk_adjustment_new(16.0-vpw->ae.effgain, 0, 16.0, 0.01, 0.1, 0);
-    vpw->vscaleeqA = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadjA));
-    gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeqA), 2);
-    g_signal_connect(vpw->vscaleeqA, "value-changed", G_CALLBACK(vscaleA), vpw);
+	vpw->eqboxA = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqboxA);
+	vpw->vadjA = gtk_adjustment_new(4.0-vpw->ae.effgain, 0, 4.0, 0.01, 0.1, 0);
+	vpw->vscaleeqA = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadjA));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeqA), 2);
+	g_signal_connect(vpw->vscaleeqA, "value-changed", G_CALLBACK(vscaleA), vpw);
 	g_signal_connect(vpw->vscaleeqA, "format-value", G_CALLBACK(scale_valuepreamp), vpw);
-    gtk_container_add(GTK_CONTAINER(vpw->eqboxA), vpw->vscaleeqA);
+	gtk_container_add(GTK_CONTAINER(vpw->eqboxA), vpw->vscaleeqA);
 	vpw->eqlabelA = gtk_label_new("Preamp");
 	gtk_container_add(GTK_CONTAINER(vpw->eqboxA), vpw->eqlabelA);
 
+// vertical scale volume
+	vpw->eqboxV = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqbox), vpw->eqboxV);
+	vpw->vadjV = gtk_adjustment_new(1.0-vpw->ae.volume, 0, 1.0, 0.01, 0.1, 0);
+	vpw->vscaleeqV = gtk_scale_new(GTK_ORIENTATION_VERTICAL, GTK_ADJUSTMENT(vpw->vadjV));
+	gtk_scale_set_digits(GTK_SCALE(vpw->vscaleeqV), 2);
+	g_signal_connect(vpw->vscaleeqV, "value-changed", G_CALLBACK(vscaleV), vpw);
+	g_signal_connect(vpw->vscaleeqV, "format-value", G_CALLBACK(scale_valuevolume), vpw);
+	gtk_container_add(GTK_CONTAINER(vpw->eqboxV), vpw->vscaleeqV);
+	vpw->eqlabelV = gtk_label_new("Volume");
+	gtk_container_add(GTK_CONTAINER(vpw->eqboxV), vpw->eqlabelV);
+
 // horizontal box
-    vpw->eqbox2 = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_container_add(GTK_CONTAINER(vpw->eqvbox), vpw->eqbox2);
+	vpw->eqbox2 = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 5);
+	gtk_container_add(GTK_CONTAINER(vpw->eqvbox), vpw->eqbox2);
 
 // checkbox
 	vpw->eqenable = gtk_check_button_new_with_label("EQ Enable");
@@ -1663,6 +1738,11 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
 	gtk_notebook_append_page(GTK_NOTEBOOK(vpw->notebook), vpw->eqvbox, vpw->nbpage3);
 	g_signal_connect(GTK_NOTEBOOK(vpw->notebook), "switch-page", G_CALLBACK(page_switched), vpw);
 	gtk_container_add(GTK_CONTAINER(vpw->playerbox), vpw->notebook);
+
+    vpw->statusbar = gtk_statusbar_new();
+    vpw->context_id = gtk_statusbar_get_context_id(GTK_STATUSBAR(vpw->statusbar), "statusbar context");
+    gtk_container_add(GTK_CONTAINER(vpw->playerbox), vpw->statusbar);
+    gtk_statusbar_push(GTK_STATUSBAR(vpw->statusbar), vpw->context_id, "");
 
 // eqvbox contents end
 
