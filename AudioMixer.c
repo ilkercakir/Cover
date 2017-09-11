@@ -327,9 +327,10 @@ void close_audiojack(audiojack *aj)
 	}
 }
 
+/*
 void jack_initialize(int channelbuffers, audiojack *aj)
 {
 	aj->mxchannel = -1;
 	aj->channelbuffers = channelbuffers;
 }
-
+*/

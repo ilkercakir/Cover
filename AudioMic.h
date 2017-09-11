@@ -45,6 +45,9 @@ typedef struct
 	snd_pcm_t *capture_handle;
 	snd_pcm_hw_params_t *hw_params;
 	micstatus status;
+	char *micbuffer;
+	int micchannels, micbuffersize, micbufferframes, micbuffersamples;
+	float prescale;
 	char *buffer;
 	int buffersize, bufferframes, buffersamples;
 	int capturebuffersize;

@@ -22,6 +22,7 @@
  */
 
 #include "VideoPlayer.h"
+#include "AudioPipe.h"
 
 typedef struct
 {
@@ -54,50 +55,7 @@ long get_next_usec(videoplayertimer *t)
     return(delta);
 }
 
-gboolean invalidate(gpointer data)
-{
-	videoplayer *v = (videoplayer*)data;
-
-	GdkWindow *dawin = gtk_widget_get_window(v->dwgarea);
-	cairo_region_t *region = gdk_window_get_clip_region(dawin);
-	gdk_window_invalidate_region (dawin, region, TRUE);
-	//gdk_window_process_updates (dawin, TRUE);
-	cairo_region_destroy(region);
-	return FALSE;
-}
-
-void destroynotify(guchar *pixels, gpointer data)
-{
-//printf("destroy notify\n");
-	free(pixels);
-}
-
-void initPixbuf(videoplayer *v)
-{
-	int i;
-
-	guchar *imgdata = malloc(v->playerWidth*v->playerHeight*4); // RGBA
-	for(i=0;i<v->playerWidth*v->playerHeight;i++)
-	{
-		((unsigned int *)imgdata)[i]=0xFF000000; // ABGR
-	}
-	g_mutex_lock(&(v->pixbufmutex));
-	if (v->pixbuf)
-		g_object_unref(v->pixbuf);
-    v->pixbuf = gdk_pixbuf_new_from_data(imgdata, GDK_COLORSPACE_RGB, TRUE, 8, v->playerWidth, v->playerHeight, v->playerWidth*4, destroynotify, NULL);
-	g_mutex_unlock(&(v->pixbufmutex));
-	gdk_threads_add_idle(invalidate, v);
-}
-
-void closePixbuf(videoplayer *v)
-{
-	g_mutex_lock(&(v->pixbufmutex));
-	g_object_unref(v->pixbuf);
-	v->pixbuf=NULL;
-	g_mutex_unlock(&(v->pixbufmutex));
-}
-
-void init_videoplayer(videoplayer *v, int width, int height, int vqMaxLength, int aqMaxLength, audiomixer *x)
+void init_videoplayer(videoplayer *v, int width, int height, int vqMaxLength, int aqMaxLength, audiomixer *x, int thread_count)
 {
 	int ret;
 
@@ -108,6 +66,9 @@ void init_videoplayer(videoplayer *v, int width, int height, int vqMaxLength, in
 
 	if((ret=pthread_mutex_init(&(v->seekmutex), NULL))!=0 )
 		printf("seek mutex init failed, %d\n", ret);
+
+	if((ret=pthread_cond_init(&(v->pausecond), NULL))!=0 )
+		printf("pause cond init failed, %d\n", ret);
 
 	if((ret=pthread_mutex_init(&(v->framemutex), NULL))!=0 )
 		printf("frame mutex init failed, %d\n", ret);
@@ -128,13 +89,13 @@ void init_videoplayer(videoplayer *v, int width, int height, int vqMaxLength, in
 
 	v->x = x;
 
+	v->thread_count = thread_count;
 	v->pFormatCtx = NULL;
 	v->pCodecCtx = NULL;
 	v->pCodecCtxA = NULL;
 	v->sws_ctx = NULL;
 	v->pCodec = NULL;
 	v->pCodecA = NULL;
-	v->thread_count = 4;
 	v->optionsDict = NULL;
 	v->optionsDictA = NULL;
 }
@@ -151,6 +112,7 @@ void close_videoplayer(videoplayer *v)
 */
 	vq_destroy(&(v->vpq));
 	pthread_mutex_destroy(&(v->framemutex));
+	pthread_cond_destroy(&(v->pausecond));
 	pthread_mutex_destroy(&(v->seekmutex));
 }
 
@@ -247,7 +209,7 @@ int open_now_playing(videoplayer *v)
 		}
 //printf("Frame rate = %2.2f\n", frame_rate);
 //printf("frametime = %d usec\n", frametime);
-//printf("Width : %d, Height : %d\n", pCodecCtx->width, pCodecCtx->height);
+//printf("Width : %d, Height : %d\n", v->pCodecCtx->coded_width, v->pCodecCtx->coded_height);
 		v->videoduration = (v->pFormatCtx->duration / AV_TIME_BASE) * v->frame_rate; // in frames
 
 		switch(v->pCodecCtx->pix_fmt)
@@ -257,8 +219,13 @@ int open_now_playing(videoplayer *v)
 			case AV_PIX_FMT_YUVJ422P:
 				v->yuvfmt = YUV422;
 				break;
-			default:
+			case AV_PIX_FMT_YUV420P:
 				v->yuvfmt = YUV420;
+				break;
+			case AV_PIX_FMT_RGBA:
+			case AV_PIX_FMT_YUVJ420P:
+			default:
+				v->yuvfmt = RGBA;
 				break;
 		}
 //printf("Pixel format %d\n", v->pCodecCtx->pix_fmt);
@@ -310,7 +277,7 @@ int open_now_playing(videoplayer *v)
 */
 		av_opt_set_int(v->swr, "in_channel_count", v->pCodecCtxA->channels, 0);
 		av_opt_set_int(v->swr, "out_channel_count", 2,  0);
-//printf("%d\n", v->spk_samplingrate);
+//printf("%d %d\n", v->pCodecCtxA->sample_rate, v->spk_samplingrate);
 		av_opt_set_int(v->swr, "in_sample_rate", v->pCodecCtxA->sample_rate, 0);
 		av_opt_set_int(v->swr, "out_sample_rate", v->spk_samplingrate, 0);
 
@@ -360,8 +327,8 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
     packet->data = NULL;
     packet->size = 0;
 
-	v->now_decoding_frame = v->now_playing_frame = 0;
-    int64_t fnum, aperiod=0;
+	v->now_decoding_frame = v->now_playing_frame = v->audioframe = 0;
+    int64_t fnum=0, aperiod=0;
 
 	char *rgba;
 	int width, height, frameFinished, ret;
@@ -369,31 +336,42 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 	uint8_t **dst_data;
 	int dst_bufsize;
 	int line_size;
+	int src_nb_samples = 1024, dst_nb_samples, max_dst_nb_samples;
+
+	audiopipe ap;
+
+	max_dst_nb_samples = dst_nb_samples = av_rescale_rnd(src_nb_samples, v->spk_samplingrate, v->pCodecCtxA->sample_rate, AV_ROUND_UP);
+	ret = av_samples_alloc_array_and_samples(&dst_data, &line_size, 2, v->spk_samplingrate, AV_SAMPLE_FMT_S16, 0);
+
+	audioCQ_init(&ap, 4096); // 1024*aj->x.channels*snd_pcm_format_width(aj->x.format)
 
 	if (v->videoStream!=-1)
 	{
-		width = v->pCodecCtx->width;
-		height = v->pCodecCtx->height;
+		//width = v->pCodecCtx->width;
+		//height = v->pCodecCtx->height;
+		width = v->codedWidth = v->pCodecCtx->coded_width;
+		height = v->codedHeight = v->pCodecCtx->coded_height; 
+		v->codecWidth = v->pCodecCtx->width;
+		v->codecHeight = v->pCodecCtx->height;
 	}
 
 	get_first_usec(&vt);
 	while ((av_read_frame(v->pFormatCtx, packet)>=0) && (!v->stoprequested))
 	{
 		v->diff1=get_next_usec(&vt); //printf("av_read_frame %ld\n", v->diff1);
-		//if (!(now_playing_frame%10))
-		//	gdk_threads_add_idle(setLevel1, &diff1);
+		//if (!(v->now_playing_frame%10))
+		//	gdk_threads_add_idle(setLevel1, (void*)v->vpwp);
 
 		if (packet->stream_index==v->videoStream) 
 		{
-			if (v->decodevideo)
-			{
+			//if (v->decodevideo)
+			//{
 				get_first_usec(&vt);
 				if ((ret=avcodec_decode_video2(v->pCodecCtx, pFrame, &frameFinished, packet))<0) // Decode video frame
 					printf("Error decoding video frame %d\n", ret);
 				v->diff2=get_next_usec(&vt); //printf("%lu usec avcodec_decode_video2\n", v->diff2);
-
-				//if (!(now_playing_frame%10))
-				//	gdk_threads_add_idle(setLevel2, &diff2);
+				//if (!(v->now_playing_frame%10))
+				//	gdk_threads_add_idle(setLevel2, (void*)v->vpwp);
 
 				if (frameFinished)
 				{
@@ -402,6 +380,8 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 						AVFrame *pFrameRGB = NULL;
 						pFrameRGB = av_frame_alloc();
 						av_frame_unref(pFrameRGB);
+
+						get_first_usec(&vt);
 
 						uint8_t *rgbbuffer = NULL;
 						int numBytes = avpicture_get_size(AV_PIX_FMT_RGB32, v->playerWidth, v->playerHeight);
@@ -413,20 +393,21 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 						struct SwsContext *sws_ctx = sws_getContext(v->pCodecCtx->width, v->pCodecCtx->height, v->pCodecCtx->pix_fmt,
 						v->playerWidth, v->playerHeight, AV_PIX_FMT_RGB32, SWS_BILINEAR, NULL, NULL, NULL);
 
-						get_first_usec(&vt);
 						//printf("sws_scale %d %d\n", playerWidth, playerHeight);
 						sws_scale(sws_ctx, (uint8_t const* const*)pFrame->data, pFrame->linesize, 0, v->pCodecCtx->height, pFrameRGB->data, pFrameRGB->linesize);
 						//printf("sws_scale done\n");
-						v->diff4=v->diff2=get_next_usec(&vt);
-
-						//gdk_threads_add_idle(setLevel4, &diff4);
-
 						sws_freeContext(sws_ctx);
 
+						v->diff3=get_next_usec(&vt);
+						//gdk_threads_add_idle(setLevel3, (void*)v->vpwp);
+
+						width = v->lineWidth = pFrameRGB->linesize[0] / 4;
+						height = v->playerHeight;
+						//printf("%d %d, %d %d\n", width, height, v->playerWidth, v->playerHeight);
 						rgba = malloc(pFrameRGB->linesize[0] * v->playerHeight);
 						//printf("malloc %d %d\n", pFrameRGB->linesize[0], playerHeight);
 						memcpy(rgba, pFrameRGB->data[0], pFrameRGB->linesize[0] * v->playerHeight);
-						//printf("memcpy %d\n", pFrameRGB->linesize[0] * playerHeight);
+						//printf("memcpy %d\n", pFrameRGB->linesize[0] * v->playerHeight);
 
 						av_free(rgbbuffer);
 						//printf("av_free\n");
@@ -439,6 +420,7 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 						switch(v->yuvfmt)
 						{
 							case YUV422:
+								width = v->lineWidth = pFrame->linesize[0];
 								rgba = malloc(width*height*2);
 								memcpy(&rgba[0], pFrame->data[0], width*height); //y
 								memcpy(&rgba[width*height], pFrame->data[1], width*height/2); //u
@@ -446,31 +428,43 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 								break;
 							case YUV420:
 							default:
+								width = v->lineWidth = pFrame->linesize[0];
 								rgba = malloc(width * height*3/2);
 								memcpy(&rgba[0], pFrame->data[0], width*height); //y
 								memcpy(&rgba[width*height], pFrame->data[1], width*height/4); //u
 								memcpy(&rgba[width*height*5/4], pFrame->data[2], width*height/4); //v
-								break;
+//printf("linesizes %d %d %d\n", pFrame->linesize[0], pFrame->linesize[1], pFrame->linesize[2]);
 						}
 					}
 
 					pthread_mutex_lock(&(v->framemutex));
 					if (!v->videoduration)
-						fnum = v->now_decoding_frame = 0;
+						fnum = v->now_playing_frame;
 					else
 						fnum = v->now_decoding_frame++;
 					pthread_mutex_unlock(&(v->framemutex));
 
-					vq_add(&(v->vpq), rgba, fnum); //printf("vq added %lld\n", fnum);
+					vq_add(&(v->vpq), rgba, fnum); //printf("vq added %ld\n", fnum);
 
-					pthread_mutex_lock(&(v->seekmutex));
-					pthread_mutex_unlock(&(v->seekmutex));
+					//if (!(v->now_playing_frame%10))
+					//	gdk_threads_add_idle(setLevel9, (void*)v->vpwp);
 
 					av_frame_unref(pFrame);
 //printf("frame %lld\n", fnum);
 
+					pthread_mutex_lock(&(v->seekmutex));
+					if (v->vpq.playerstatus==PAUSED)
+					{
+						close_audiojack(aj);
+						while (v->vpq.playerstatus==PAUSED)
+						{
+							pthread_cond_wait(&(v->pausecond), &(v->seekmutex));
+						}
+						connect_audiojack(v->aqMaxLength, aj, v->x);
+					}
+					pthread_mutex_unlock(&(v->seekmutex));
 				}
-			}
+			//}
 		}
 		else if (packet->stream_index==v->audioStream)
 		{
@@ -480,46 +474,76 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 //printf("avcodec_decode_audio4\n");
 			if (frameFinished)
 			{
-				//ret = av_samples_alloc_array_and_samples(&dst_data, &line_size, v->pCodecCtxA->channels, pFrame->nb_samples, AV_SAMPLE_FMT_S16, 0);
-				ret = av_samples_alloc_array_and_samples(&dst_data, &line_size, 2, v->spk_samplingrate, AV_SAMPLE_FMT_S16, 0);
-//printf("av_samples_alloc_array_and_samples, %d\n", ret);
-				//ret = swr_convert(v->swr, dst_data, pFrame->nb_samples, (const uint8_t **)pFrame->extended_data, pFrame->nb_samples);
-				ret = swr_convert(v->swr, dst_data, v->spk_samplingrate, (const uint8_t **)pFrame->extended_data, pFrame->nb_samples);
-				if (ret<0) printf("swr_convert error %d\n", ret);
-				//dst_bufsize = av_samples_get_buffer_size(NULL, v->pCodecCtxA->channels, ret, AV_SAMPLE_FMT_S16, 0);
-				dst_bufsize = av_samples_get_buffer_size(NULL, 2, ret, AV_SAMPLE_FMT_S16, 0);
-//printf("bufsize=%d\n", dst_bufsize);
+				dst_nb_samples = av_rescale_rnd(swr_get_delay(v->swr, v->pCodecCtxA->sample_rate) + pFrame->nb_samples, v->spk_samplingrate, v->pCodecCtxA->sample_rate, AV_ROUND_UP);
+//printf("nb/max = %d/%d\n", dst_nb_samples, max_dst_nb_samples);
+				if (dst_nb_samples > max_dst_nb_samples)
+				{
+					av_freep(&dst_data[0]);
+					ret = av_samples_alloc(dst_data, &line_size, 2, dst_nb_samples, AV_SAMPLE_FMT_S16, 1);
+					if (ret < 0)
+						break;
+					max_dst_nb_samples = dst_nb_samples;
+				}
+
+				// convert to destination format
+				if ((ret = swr_convert(v->swr, dst_data, dst_nb_samples, (const uint8_t **)pFrame->extended_data, pFrame->nb_samples))<0)
+					printf("Error while converting %d\n", ret);
+				dst_bufsize = av_samples_get_buffer_size(&line_size, 2, ret, AV_SAMPLE_FMT_S16, 1);
+//printf("ret=%d, dst_bufsize=%d\n", ret, dst_bufsize);
 				if (dst_data)
 				{
 					if (dst_data[0])
 					{
 						if (dst_bufsize)
 						{
-							if (aperiod++) // mp3 has a small first buffer, ignore it
+							aperiod++;
+							//printf("bufsize %d\n", dst_bufsize);
+							audioCQ_add(&ap, (char *)dst_data[0], dst_bufsize);
+							while(audioCQ_remove(&ap))
 							{
-								//printf("bufsize %d\n", dst_bufsize);
-								AudioEqualizer_BiQuadProcess(v->aeq, dst_data[0], dst_bufsize);
-								writetojack((char*)dst_data[0], dst_bufsize, aj);
+								AudioEqualizer_BiQuadProcess(v->aeq, (uint8_t *)ap.buffer, ap.buffersize);
+								writetojack(ap.buffer, ap.buffersize, aj);
+							}
+							//dst_bufsize / aj->jackframes;
+							if (aj->mxchannel!=-1)
+							{
+								v->audioframe += aj->jackframes;
 								if (!v->videoduration) // no video stream
 								{
-									v->now_playing_frame += dst_bufsize / aj->jackframes;
+									pthread_mutex_lock(&(v->framemutex));
+									v->now_playing_frame += aj->jackframes;
+									pthread_mutex_unlock(&(v->framemutex));
+
 									if (!(aperiod%10))
-										gdk_threads_add_idle(update_hscale, (void*)v);
+										gdk_threads_add_idle(update_hscale, (void*)v->vpwp);
 								}
+								//if (!(aperiod%10))
+								//{
+								//	v->aqLength = (*(aj->rear) - *(aj->front) + aj->channelbuffers) % aj->channelbuffers;
+								//	gdk_threads_add_idle(setLevel8, (void*)v->vpwp);
+								//}
+								//if (!v->decodevideo) // Video player not focussed
+								//{
+								//	v->now_decoding_frame = v->now_playing_frame = (int64_t)(((float)v->audioframe/(float)v->spk_samplingrate)*v->frame_rate);
+								//	//printf("%lld\n", (int64_t)(((float)v->audioframe/(float)v->spk_samplingrate)*v->frame_rate));
+								//}
 							}
 						}
-						av_freep(&(dst_data[0]));
 					}
-					av_freep(&dst_data);
 				}
-//printf("write done\n");
-				pthread_mutex_lock(&(v->seekmutex));
-				pthread_mutex_unlock(&(v->seekmutex));
-
-				//if (!(p->label%10))
-				//	gdk_threads_add_idle(setLevel8, &aqLength);
-
 				av_frame_unref(pFrame);
+
+				pthread_mutex_lock(&(v->seekmutex));
+				if (v->vpq.playerstatus==PAUSED)
+				{
+					close_audiojack(aj);
+					while (v->vpq.playerstatus==PAUSED)
+					{
+						pthread_cond_wait(&(v->pausecond), &(v->seekmutex));
+					}
+					connect_audiojack(v->aqMaxLength, aj, v->x);
+				}
+				pthread_mutex_unlock(&(v->seekmutex));
 			}
 		}
 
@@ -532,6 +556,12 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 
 		get_first_usec(&vt);
 	}
+
+	if (dst_data[0])
+		av_freep(&(dst_data[0]));
+	if (dst_data)
+		av_freep(&dst_data);
+
 	av_frame_free(&pFrame);
 //printf("av_frame_free\n");
 	av_packet_unref(packet);
@@ -554,100 +584,52 @@ void frame_reader_loop(videoplayer *v, audiojack *aj)
 	avformat_network_deinit();
 
 	free(v->swr);
+
+	audioCQ_close(&ap);
 }
 
 void frame_player_loop(videoplayer *v)
 {
-	CUBE_STATE_T state;
-	UserData *userData;
 	videoqueue *q;
 	long diff = 0;
 	videoplayertimer vt;
 	int width, height;
 
+	v->framesskipped = 0;
+	//resetLevels(v);
 //printf("starting frame player\n");
-    bcm_host_init();
 
-    //init_ogl(p_state); // Render to screen
-    init_ogl2(&state, v->playerWidth, v->playerHeight); // Render to Frame Buffer
-    if (Init(&state, v->yuvfmt) == GL_FALSE)
-    {
-		printf("Init failed\n");
-		return;
-	}
-
-	if (v->videoStream!=-1)
-	{
-		if (!v->videoduration) // No video stream || single jpeg album art with mp3
-		{
-			userData = state.user_data;
-			initPixbuf(v);
-			userData->outrgb = (char*)gdk_pixbuf_get_pixels(v->pixbuf);
-			while ((q=vq_remove(&(v->vpq))))
-			{
-				g_mutex_lock(&(v->pixbufmutex));
-//printf("pixbuf memcpy\n");
-				memcpy(userData->outrgb, q->yuv, state.screen_width*state.screen_height*4);
-//printf("pixbuf memcpy %d %d\n", state.screen_width, state.screen_height);
-				g_mutex_unlock(&(v->pixbufmutex));
-				v->diff3 = v->diff4 = v->diff5 = 0;
-
-				gdk_threads_add_idle(invalidate, (void *)v);
-
-				free(q->yuv);
-				free(q);
-			}
-			close_ogl2(&state);
-			return;
-		}
-	}
-
-	if (v->videoStream!=-1)
-	{
-		width = v->pCodecCtx->width;
-		height = v->pCodecCtx->height;
-	}
-	else
-	{
-		width = v->playerWidth;
-		height = v->playerHeight;
-	}
-
-	switch(v->yuvfmt)
-	{
-		case YUV422:
-			userData = state.user_data;
-			setSize(&state, width/4, height*2);
-
-			initPixbuf(v);
-			userData->outrgb = (char*)gdk_pixbuf_get_pixels(v->pixbuf);
-
-			GLfloat picSize422[2] = { (GLfloat)width, (GLfloat)height };
-			glUniform2fv(userData->sizeLoc, 1, picSize422);
-			GLfloat yuv2rgbmatrix422[9] = { 1.0, 0.0, 1.402, 1.0, -0.344, -0.714, 1.0, 1.772, 0.0 }; // YUV422
-			glUniformMatrix3fv(userData->cmatrixLoc, 1, FALSE, yuv2rgbmatrix422);
-			break;
-		case YUV420:
-		default:
-			userData = state.user_data;
-			setSize(&state, width/4, height*3/2);
-
-			initPixbuf(v);
-			userData->outrgb = (char*)gdk_pixbuf_get_pixels(v->pixbuf);
-
-			GLfloat picSize420[2] = { (GLfloat)width, (GLfloat)height*3/2 };
-			glUniform2fv(userData->sizeLoc, 1, picSize420);
-			GLfloat yuv2rgbmatrix420[9] = { 1.0, 0.0, 1.5958, 1.0, -0.3917, -0.8129, 1.0, 2.017, 0.0 }; // YUV420
-			glUniformMatrix3fv(userData->cmatrixLoc, 1, FALSE, yuv2rgbmatrix420);
-			break;
-	}
-
-//printf("player start\n");
 	while ((q=vq_remove(&(v->vpq))))
 	{
-//printf("vq_remove %lld\n", q->label);
-		if (v->videoduration)
-			v->now_playing_frame = q->label;
+//printf("vq_remove %ld\n", q->label);
+//printf("length %d\n", v->vpq.vqLength);
+		v->now_playing_frame = q->label;
+		if (!v->now_playing_frame) // initialize gl with first frame
+		{
+			if (v->videoStream!=-1)
+			{
+				if (!v->videoduration)
+				{
+					width = v->playerWidth;
+					height = v->playerHeight;
+				}
+				else
+				{
+					//width = v->pCodecCtx->width;
+					//height = v->pCodecCtx->height;
+					width = v->codedWidth;
+					height = v->codedHeight;
+				}
+			}
+			else
+			{
+				width = v->playerWidth;
+				height = v->playerHeight;
+			}
+
+			//printf("reinit fmt width %d height %d, coded width %d coded height %d, codec width %d codec height %d\n", width, height, v->codedWidth, v->codedHeight, v->codecWidth, v->codecHeight);
+			reinit_ogl(&(v->oi), v->yuvfmt, width, height, v->lineWidth, v->codecHeight);
+		}
 
 		//if (!(q->label%10))
 		//	gdk_threads_add_idle(setLevel9, &(v->vpq.vqLength));
@@ -661,68 +643,45 @@ void frame_player_loop(videoplayer *v)
 				usleep(0-diff);
 				diff = 0;
 			}
-//printf("skip %lld\n", p->label);
-			v->framesskipped++;
-			v->diff7 = (float)(v->framesskipped*100)/(float)v->now_playing_frame;
-			//gdk_threads_add_idle(setLevel7, &v->diff7);
+//printf("skip %lld\n", q->label);
+			//v->framesskipped++;
+			//v->diff7 = (float)(v->framesskipped*100)/(float)v->now_playing_frame;
+			//gdk_threads_add_idle(setLevel7, (void*)v->vpwp);
 
 			free(q->yuv);
 			free(q);
 			continue;
 		}
 
-
 		get_first_usec(&vt);
-		switch(v->yuvfmt)
-		{
-			case YUV422:
-				texImage2D(&state, q->yuv, width/4, height*2);
-				break;
-			case YUV420:
-			default:
-				texImage2D(&state, q->yuv, width/4, height*3/2);
-				break;
-		}
+		draw_texture(&(v->oi), q->yuv);
+		free(q->yuv);
+		free(q);
 		v->diff3=get_next_usec(&vt);
 //printf("%lu usec glTexImage2D\n", diff3);
 
 		get_first_usec(&vt);
-		redraw_scene(&state);
+		//render
 		v->diff4=get_next_usec(&vt);
 //printf("%lu usec redraw\n", diff4);
 
-		get_first_usec(&vt);
-		g_mutex_lock(&(v->pixbufmutex));
-		glReadPixels(0, 0, state.screen_width, state.screen_height, GL_RGBA, GL_UNSIGNED_BYTE, userData->outrgb);
-		g_mutex_unlock(&(v->pixbufmutex));
-		v->diff5=get_next_usec(&vt);
-//printf("%lu usec glReadPixels\n", diff5);
-
-		//checkNoGLES2Error();
-
 		if (!(v->now_playing_frame%10))
 		{
-		//	gdk_threads_add_idle(setLevel3, &(v->diff3));
-		//	gdk_threads_add_idle(setLevel4, &(v->diff4));
-		//	gdk_threads_add_idle(setLevel5, &(v->diff5));
+			//gdk_threads_add_idle(setLevel3,(void*)v->vpwp);
+			//gdk_threads_add_idle(setLevel4, (void*)v->vpwp);
 			gdk_threads_add_idle(update_hscale, (void*)v->vpwp);
 		}
 
-		diff = v->diff3 + v->diff4 + v->diff5 + 6000;
+		diff = v->diff3 + v->diff4 + 1000;
 //printf("%5lu usec frame, frametime %5d\n", diff, frametime);
 		diff -= v->frametime;
-		gdk_threads_add_idle(invalidate, (void *)v);
 		if (diff<0)
 		{
 			//printf("usleep %ld\n", 0-diff);
 			usleep(0-diff);
 			diff = 0;
 		}
-		free(q->yuv);
-		free(q);
 	}
-	close_ogl2(&state);
-//printf("closed ogl\n");
 }
 
 static void* read_frames(void* args)
@@ -737,7 +696,7 @@ static void* read_frames(void* args)
 	connect_audiojack(vp->aqMaxLength, &jack2, vp->x);
 
 	frame_reader_loop(vp, &jack2);
-
+//printf("close_audiojack\n");
 	close_audiojack(&jack2);
 
 //printf("requeststop_videoplayer\n");
@@ -782,14 +741,18 @@ gpointer thread0_videoplayer(void* args)
 	{}
 //printf("read_frames->%d\n", 3);
 	if ((err = pthread_setaffinity_np(vp->tid[1], sizeof(cpu_set_t), &(vp->cpu[3]))))
-		printf("pthread_setaffinity_np error %d\n", err);
+	{
+		//printf("pthread_setaffinity_np error %d\n", err);
+	}
 
 	err = pthread_create(&(vp->tid[2]), NULL, &videoPlayFromQueue, (void*)vp);
 	if (err)
 	{}
 //printf("videoPlayFromQueue->%d\n", 2);
 	if ((err = pthread_setaffinity_np(vp->tid[2], sizeof(cpu_set_t), &(vp->cpu[2]))))
-		printf("pthread_setaffinity_np error %d\n", err);
+	{
+		//printf("pthread_setaffinity_np error %d\n", err);
+	}
 
 	int i;
 	if ((i=pthread_join(vp->tid[1], NULL)))

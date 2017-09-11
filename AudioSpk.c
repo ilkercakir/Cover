@@ -91,9 +91,10 @@ int set_hwparams(speaker *s)
 	}
 	s->buffer_size = size;
 
-	if ((err = snd_pcm_hw_params_set_period_size(s->handle, s->hwparams, s->persize, 0)) < 0)
+	//if ((err = snd_pcm_hw_params_set_period_size(s->handle, s->hwparams, s->persize, 0)) < 0)
+	if ((err = snd_pcm_hw_params_set_period_size_near(s->handle, s->hwparams, &s->persize, &dir)) < 0)
 	{
-		printf("Unable to set period size %i for playback: %s\n", s->persize, snd_strerror(err));
+		printf("Unable to set period size %ld for playback: %s\n", s->persize, snd_strerror(err));
 		return(err);
 	}
 
@@ -167,7 +168,7 @@ int init_audio_hw_spk(speaker *s)
 {
 	int err;
 
-	s->persize = 1024;
+	s->persize = 1024; // frames
 	s->bufsize = 10240; // persize * 10; // 10 periods
 
 	snd_pcm_hw_params_alloca(&(s->hwparams));

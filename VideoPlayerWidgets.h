@@ -17,14 +17,19 @@
 
 #include "AudioMixer.h"
 #include "VideoPlayer.h"
-#include "BiQuad.h"
+
+typedef enum
+{
+	text_html,
+	string
+}target_info;
 
 typedef struct
 {
 GtkWidget *vpwindow;
 GtkWidget *box1;
 GtkWidget *horibox;
-GtkWidget *dwgarea;
+GtkWidget *drawingarea;
 GtkWidget *button_box;
 GtkWidget *button1;
 GtkWidget *button2;
@@ -33,6 +38,7 @@ GtkWidget *button9;
 GtkWidget *button10;
 GtkWidget *button11;
 GtkWidget *buttonParameters;
+GtkWidget *buttonTest;
 GtkAdjustment *hadjustment;
 GtkWidget *hscale;
 GtkWidget *stackswitcher;
@@ -105,7 +111,7 @@ GtkWidget *eqlabelV;
 GtkWidget *eqenable;
 GtkWidget *eqautolevel;
 GtkWidget *combopreset;
-
+/*
 GtkWidget *windowparm;
 GtkWidget *parmvbox;
 GtkWidget *parmhbox1;
@@ -119,9 +125,9 @@ GtkWidget *spinbutton2;
 GtkWidget *parmhbox3;
 GtkWidget *parmlabel3;
 GtkWidget *spinbutton3;
-GtkWidget *parmhbox4;
-GtkWidget *parmlabel4;
-GtkWidget *spinbutton4;
+//GtkWidget *parmhbox4;
+//GtkWidget *parmlabel4;
+//GtkWidget *spinbutton4;
 GtkWidget *parmhlevel1;
 GtkWidget *levellabel1;
 GtkWidget *parmhlevel2;
@@ -136,15 +142,27 @@ GtkWidget *parmhlevel6;
 GtkWidget *levellabel6;
 GtkWidget *parmhlevel7;
 GtkWidget *levellabel7;
-
+GtkWidget *levelbar1;
+GtkWidget *levelbar2;
+GtkWidget *levelbar3;
+GtkWidget *levelbar4;
+GtkWidget *levelbar5;
+GtkWidget *levelbar6;
+GtkWidget *levelbar7;
+GtkWidget *label1;
+GtkWidget *label2;
+GtkWidget *label3;
+GtkWidget *label4;
+GtkWidget *label5;
+GtkWidget *label6;
+GtkWidget *label7;
+*/
 GtkWidget *notebook;
 GtkWidget *nbpage1;
 GtkWidget *nbpage2;
 GtkWidget *nbpage3;
 
-int vpvisible;
-int hscaleupd;
-int playerWidth, playerHeight;
+int vpvisible, hscaleupd, sliding, playerWidth, playerHeight;
 
 videoplayer vp;
 eqdefaults aedef;
@@ -155,19 +173,21 @@ pthread_t tid;
 int retval0;
 cpu_set_t cpu[4];
 char msg[256];
+GtkTargetEntry target_entries[2];
 }vpwidgets;
 
 typedef struct
 {
 vpwidgets *vpw;
-int vqMaxLength, aqMaxLength, spk_samplingrate;
+int vqMaxLength, aqMaxLength, thread_count, spk_samplingrate;
 }playlistparams;
 
-void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, int vqMaxLength, int aqMaxLength, int spk_samplingrate);
+void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, int vqMaxLength, int aqMaxLength, int spk_samplingrate, int thread_count);
 void close_playlistparams(playlistparams *plparams);
 void toggle_vp(vpwidgets *vpw, GtkWidget *togglebutton);
 void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int playWidth, int playHeight, audiomixer *x);
 void close_videoplayerwidgets(vpwidgets *vpw);
 void press_vp_stop_button(playlistparams *plp);
+void press_vp_resume_button(playlistparams *plp);
 void vpw_commandline(playlistparams *plp, int argcount);
 #endif

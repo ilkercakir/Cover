@@ -31,11 +31,12 @@ void populate_card_list(GtkWidget *comboinputdev, GtkWidget *combooutputdev)
 	char* shortname = NULL;
 	char name[32];
 	char devicename[32];
+	char devicenamedisplayed[128];
 	//const char* subname;
 	snd_ctl_t *ctl;
 	snd_pcm_info_t *info;
 	int device;
-	int sub, foundsub, devicepreset;
+	int sub, foundsub, inpreset=0, outpreset=0;
 
 	do
 	{
@@ -85,7 +86,7 @@ void populate_card_list(GtkWidget *comboinputdev, GtkWidget *combooutputdev)
 			snd_ctl_pcm_info(ctl, info);
 			int subs_in = snd_pcm_info_get_subdevices_count(info);
 			//printf("Input subdevices : %d\n", subs_in);
-			for(sub=0,foundsub=0,devicepreset=0;sub<subs_in;sub++)
+			for(sub=0,foundsub=0;sub<subs_in;sub++)
 			{
 				snd_pcm_info_set_subdevice(info, sub);
 				if ((status = snd_ctl_pcm_info(ctl, info)) < 0)
@@ -100,10 +101,12 @@ void populate_card_list(GtkWidget *comboinputdev, GtkWidget *combooutputdev)
 			if (foundsub)
 			{
 				sprintf(devicename, "hw:%d,%d", card, device);
-				gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(comboinputdev), devicename, shortname);
-				if (!devicepreset)
+				sprintf(devicenamedisplayed, "%s %s", shortname, devicename);
+				//gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(comboinputdev), devicename, shortname);
+				gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(comboinputdev), devicename, devicenamedisplayed);
+				if (!inpreset)
 				{
-					devicepreset = 1;
+					inpreset = 1;
 					g_object_set((gpointer)comboinputdev, "active-id", devicename, NULL);
 				}
 			}
@@ -112,7 +115,7 @@ void populate_card_list(GtkWidget *comboinputdev, GtkWidget *combooutputdev)
 			snd_ctl_pcm_info(ctl, info);
 			int subs_out = snd_pcm_info_get_subdevices_count(info);
 			//printf("Output subdevices : %d\n", subs_out);
-			for(sub=0,foundsub=0,devicepreset=0;sub<subs_out;sub++)
+			for(sub=0,foundsub=0;sub<subs_out;sub++)
 			{
 				snd_pcm_info_set_subdevice(info, sub);
 				if ((status = snd_ctl_pcm_info(ctl, info)) < 0)
@@ -127,10 +130,12 @@ void populate_card_list(GtkWidget *comboinputdev, GtkWidget *combooutputdev)
 			if (foundsub)
 			{
 				sprintf(devicename, "hw:%d,%d", card, device);
-				gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combooutputdev), devicename, shortname);
-				if (!devicepreset)
+				sprintf(devicenamedisplayed, "%s %s", shortname, devicename);
+				//gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combooutputdev), devicename, shortname);
+				gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combooutputdev), devicename, devicenamedisplayed);
+				if (!outpreset)
 				{
-					devicepreset = 1;
+					outpreset = 1;
 					g_object_set((gpointer)combooutputdev, "active-id", devicename, NULL);
 				}
 			}

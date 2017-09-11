@@ -8,7 +8,7 @@
 
 typedef struct
 {
-	int persize;
+	snd_pcm_uframes_t persize;
 	int bufsize;
 	snd_pcm_t *handle;
 	char device[32];	// playback device

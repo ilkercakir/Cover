@@ -3,77 +3,94 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <malloc.h>
+#include <stdlib.h>
+#include <X11/X.h>
+#include <X11/Xlib.h>
+
+#include <gtk/gtk.h>
+#include <gdk/gdk.h>
+#include <gdk/gdkx.h>
 
 #define EGL_EGLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
-
-#include <bcm_host.h>
+#include <GL/gl.h>
+#include <GL/glx.h>
+#include <GL/glu.h>
+#include <GL/glext.h>
 
 typedef enum
 {
+	RGBA,
 	YUV420,
 	YUV422
 }YUVformats;
 
 typedef struct
 {
-    // Handle to a program object
-   GLuint programObject;
+	GLuint program;
+	GLuint va_buffer;
+	GLuint vb_buffer;
+	GLuint ea_buffer;
+	GLint positionLoc;
+	GLint samplerLoc;
+	GLint yuvsamplerLoc[3];
+	GLint sizeLoc;
+	GLint cmatrixLoc;
+	GLuint tex;
+	GLuint texyuv[3];
+	GLint texture_coord_attribute;
+	GLfloat vVertices[8];
+	GLfloat tVertices[8];
+	GLuint indices[6];
 
-   // Attribute locations
-   GLint  positionLoc;
-   GLint  texCoordLoc;
+	GdkVisual *visual;
+	GdkScreen *screen;
+	XVisualInfo *xvisual;
+	Colormap xcolormap;
+	Display *display;
+	Window root;
+	int xscreen;
+	int attributes[14];
+	GLXContext context;
+	GdkWindow *w;
+	GdkDisplay *d;
+	Display *did;
+	Window wid;
 
-   // Sampler location
-   GLint samplerLoc;
-   
-   // Image size vector location vec2(WIDTH, HEIGHT)
-   GLint sizeLoc;
-
-   // Input texture
-   GLuint tex;
-
-   // YUV->RGB conversion matrix
-   GLuint cmatrixLoc;
-
-	// Frame & Render buffers
-	GLuint canvasFrameBuffer;
-	GLuint canvasRenderBuffer;
-
-	char *outrgb;
-
-	// Output texture
-	GLuint outtex;
-} UserData;
+	YUVformats fmt;
+	int width, height; // texture size
+	int linewidth, codecheight; // cropped video
+}oglstate;
 
 typedef struct
 {
-    uint32_t screen_width;
-    uint32_t screen_height;
+	YUVformats fmt;
+	int width, height, linewidth, codecheight;
+	char *buf;
+	oglstate *ogl;
+	GtkWidget *widget;
+}oglparameters;
 
-    EGLDisplay display;
-    EGLSurface surface;
-    EGLContext context;
+typedef struct
+{
+	pthread_mutex_t *A;
+	pthread_cond_t *ready;
+	pthread_cond_t *done;
+	pthread_cond_t *busy;
+	int commandready, commanddone, commandbusy;
+	void (*func)(oglparameters *data);
+	oglparameters data;
+	oglstate ogl;
+	pthread_t tid;
+	int retval;
+	int stoprequested;
+	GtkWidget *widget;
+}oglidle;
 
-	UserData *user_data;
-
-} CUBE_STATE_T;
-
-void checkNoGLES2Error();
-void init_ogl(CUBE_STATE_T *state, int codecWidth, int codecHeight);
-void init_ogl2(CUBE_STATE_T *state, int pWidth, int pHeight);
-void close_ogl2(CUBE_STATE_T *state);
-GLuint LoadShader(GLenum type, const char *shaderSrc);
-GLuint LoadProgram(const char *vertShaderSrc, const char *fragShaderSrc);
-int Init_YUV420(CUBE_STATE_T *state);
-int Init_YUV422(CUBE_STATE_T *p_state);
-int Init(CUBE_STATE_T *state, YUVformats fmt);
-void setSize(CUBE_STATE_T *state, int width, int height);
-void texImage2D(CUBE_STATE_T *state, char* buf, int width, int height);
-void redraw_scene(CUBE_STATE_T *state);
-void list_uniforms_of_program(CUBE_STATE_T *state);
+void realize_da_event(GtkWidget *widget, gpointer data);
+gboolean draw_da_event(GtkWidget *widget, cairo_t *cr, gpointer data);
+void destroy_da_event(GtkWidget *widget, gpointer data);
+void reinit_ogl(oglidle *i, YUVformats fmt, int width, int height, int linewidth, int codecheight);
+void draw_texture(oglidle *i, char *buf);
 #endif

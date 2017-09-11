@@ -23,24 +23,7 @@
 
 #include "BiQuad.h"
 
-/* Computes a BiQuad filter on a sample */
-inline float BiQuad(biquad *b, float sample)
-{
-   float result;
-
-   /* compute result */
-   result = b->a0 * sample + b->a1 * b->x1 + b->a2 * b->x2 - b->a3 * b->y1 - b->a4 * b->y2;
-
-   /* shift x1 to x2, sample to x1 */
-   b->x2 = b->x1;
-   b->x1 = sample;
-
-   /* shift y1 to y2, result to y1 */
-   b->y2 = b->y1;
-   b->y1 = result;
-
-   return result;
-}
+extern inline float BiQuad(biquad *b, float sample);
 
 /* sets up a BiQuad Filter */
 void BiQuad_init(biquad *b, filtertype type, float dbGain, float freq, float srate, float bandwidth)

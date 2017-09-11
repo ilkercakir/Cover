@@ -23,8 +23,8 @@
  */
 
 /*
-compile with gcc -Wall -c "%f" -DUSE_OPENGL -DUSE_EGL -DIS_RPI -DSTANDALONE -D__STDC_CONSTANT_MACROS -D__STDC_LIMIT_MACROS -DTARGET_POSIX -D_LINUX -fPIC -DPIC -D_REENTRANT -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -U_FORTIFY_SOURCE -g -ftree-vectorize -pipe -DHAVE_LIBBCM_HOST -DUSE_EXTERNAL_LIBBCM_HOST -DUSE_VCHIQ_ARM -Wno-psabi -mcpu=cortex-a53 -mfloat-abi=hard -mfpu=neon-fp-armv8 -mneon-for-64bits $(pkg-config --cflags gtk+-3.0) -I/opt/vc/include/ -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux -Wno-deprecated-declarations
-link with gcc -Wall -o "%e" "%f" AudioDev.o AudioEffects.o AudioMic.o AudioMixer.o AudioSpk.o BiQuad.o VideoPlayerWidgets.o VideoPlayer.o VideoQueue.o YUV420RGBgl.o $(pkg-config --cflags gtk+-3.0) -Wl,--whole-archive -I/opt/vc/include -L/opt/vc/lib/ -lGLESv2 -lEGL -lbcm_host -lvchiq_arm -lpthread -lrt -ldl -lm -Wl,--no-whole-archive -rdynamic $(pkg-config --libs gtk+-3.0) $(pkg-config --libs libavcodec libavformat libavutil libswscale) -lasound $(pkg-config --libs gtk+-3.0) $(pkg-config --libs sqlite3)
+compile with gcc -Wall -c "%f" -DUSE_OPENGL -DSTANDALONE -D__STDC_CONSTANT_MACROS -D__STDC_LIMIT_MACROS -DTARGET_POSIX -D_LINUX -fPIC -DPIC -D_REENTRANT -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -U_FORTIFY_SOURCE -g -ftree-vectorize -pipe -Wno-psabi $(pkg-config --cflags libavcodec libavformat libavutil libswscale libswresample) $(pkg-config --cflags gtk+-3.0) -Wno-deprecated-declarations
+link with gcc -Wall -o "%e" "%f" AudioDev.o AudioEffects.o AudioMic.o AudioMixer.o AudioPipe.o AudioSpk.o BiQuad.o VideoPlayerWidgets.o VideoPlayer.o VideoQueue.o YUV420RGBgl.o -Wl,--whole-archive -Wl,--no-whole-archive -rdynamic $(pkg-config --cflags gtk+-3.0) $(pkg-config --libs libavcodec libavformat libavutil libswscale libswresample) -lpthread -lrt -ldl -lm -lGL $(pkg-config --libs gtk+-3.0) -lasound $(pkg-config --libs gtk+-3.0) $(pkg-config --libs sqlite3)
  */
 
 #define _GNU_SOURCE
@@ -35,7 +35,6 @@ link with gcc -Wall -o "%e" "%f" AudioDev.o AudioEffects.o AudioMic.o AudioMixer
 #include "AudioMixer.h"
 #include "AudioSpk.h"
 #include "BiQuad.h"
-#include "YUV420RGBgl.h"
 #include "VideoPlayer.h"
 #include "VideoPlayerWidgets.h"
 
@@ -116,7 +115,7 @@ cpu_set_t cpu[4];
 int retval_thread0, retval_thread1, retval_thread2, retval_thread3;
 
 snd_pcm_format_t samplingformat = SND_PCM_FORMAT_S16;
-int samplingrate = 44100;
+int samplingrate = 48000;
 int queueLength = 2;
 int frames_default = 128;
 
@@ -203,7 +202,6 @@ static gpointer recorderthread(gpointer args)
 
 	int err;
 
-	//mic.device = "hw:1,0";
 	gchar *strval;
 	g_object_get((gpointer)comboinputdev, "active-id", &strval, NULL);
 	if (strval)
@@ -270,7 +268,6 @@ static gpointer mixerthread(gpointer args)
 	int ctype_old;
 	pthread_setcanceltype(ctype, &ctype_old);
 
-	//spk.device = "plughw:0,0";
 	gchar *strval;
 	g_object_get((gpointer)combooutputdev, "active-id", &strval, NULL);
 	init_spk(&spk, strval, samplingformat, samplingrate, stereo);
@@ -343,14 +340,6 @@ static gpointer thread0(gpointer args)
 	push_message(statusbar, context_id, delayms);
 
 	int err;
-	err = pthread_create(&(tid[1]), NULL, &recorderthread, NULL);
-	if (err)
-	{}
-//printf("recorderthread->%d\n", 1);
-	CPU_ZERO(&(cpu[1]));
-	CPU_SET(1, &(cpu[1]));
-	if ((err=pthread_setaffinity_np(tid[1], sizeof(cpu_set_t), &(cpu[1]))))
-		printf("pthread_setaffinity_np error %d\n", err);
 
 	err = pthread_create(&(tid[2]), NULL, &mixerthread, NULL);
 	if (err)
@@ -359,7 +348,20 @@ static gpointer thread0(gpointer args)
 	CPU_ZERO(&(cpu[1]));
 	CPU_SET(1, &(cpu[1]));
 	if ((err=pthread_setaffinity_np(tid[2], sizeof(cpu_set_t), &(cpu[1]))))
-		printf("pthread_setaffinity_np error %d\n", err);
+	{
+		//printf("pthread_setaffinity_np error %d\n", err);
+	}
+
+	err = pthread_create(&(tid[1]), NULL, &recorderthread, NULL);
+	if (err)
+	{}
+//printf("recorderthread->%d\n", 1);
+	CPU_ZERO(&(cpu[1]));
+	CPU_SET(1, &(cpu[1]));
+	if ((err=pthread_setaffinity_np(tid[1], sizeof(cpu_set_t), &(cpu[1]))))
+	{
+		//printf("pthread_setaffinity_np error %d\n", err);
+	}
 
 	int i;
 	if ((i=pthread_join(tid[1], NULL)))
@@ -387,7 +389,9 @@ int create_thread0(void)
 	CPU_ZERO(&(cpu[1]));
 	CPU_SET(1, &(cpu[1]));
 	if ((err=pthread_setaffinity_np(tid[0], sizeof(cpu_set_t), &(cpu[1]))))
-		printf("pthread_setaffinity_np error %d\n", err);
+	{
+		//printf("pthread_setaffinity_np error %d\n", err);
+	}
 
 	return(0);
 }
@@ -409,7 +413,9 @@ void terminate_thread0(gpointer data)
 static gboolean delete_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 {
 	playlistparams *plp = (playlistparams *)data;
-	press_vp_stop_button(plp);
+
+	press_vp_resume_button(plp); // Press resume if paused
+	press_vp_stop_button(plp); // Press stop if playing
 	terminate_thread0(data);
 	return FALSE; // return FALSE to emit destroy signal
 }
@@ -712,6 +718,8 @@ static void vp_toggled(GtkWidget *togglebutton, gpointer data)
 
 int main(int argc, char *argv[])
 {
+	XInitThreads();
+
 	/* This is called in all GTK applications. Arguments are parsed
 	 * from the command line and are returned to the application. */
 	gtk_init(&argc, &argv);
@@ -965,10 +973,12 @@ int main(int argc, char *argv[])
 	statusbar = gtk_statusbar_new();
 	gtk_container_add(GTK_CONTAINER(fxbox), statusbar);
 
+	init_playlistparams(&plparams, &vpw1, 20, 20, samplingrate, 4); // video, audio, spk_samplingrate, thread_count
+	//init_videoplayerwidgets(&plparams, argc, argv, 800, 450, &mx);
+	init_videoplayerwidgets(&plparams, argc, argv, 640, 360, &mx);
 
 	gtk_widget_show_all(window);
-	init_playlistparams(&plparams, &vpw1, 50, 50, samplingrate); // video, audio, spk_samplingrate
-	init_videoplayerwidgets(&plparams, argc, argv, 800, 450, &mx);
+
 	create_thread0();
 	vpw_commandline(&plparams, argc);
 	gtk_main();
