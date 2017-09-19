@@ -46,6 +46,7 @@ GtkWidget *window;
 GtkWidget *fxbox;
 GtkWidget *confbox;
 GtkWidget *frameconf;
+GtkWidget *confgrid;
 GtkWidget *inputdevlabel;
 GtkWidget *comboinputdev;
 GtkWidget *frameslabel;
@@ -728,7 +729,7 @@ int main(int argc, char *argv[])
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER);
 	gtk_container_set_border_width(GTK_CONTAINER (window), 2);
-	gtk_widget_set_size_request(window, 100, 100);
+	//gtk_widget_set_size_request(window, 100, 100);
 	gtk_window_set_title(GTK_WINDOW(window), "Cover");
 	gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
 
@@ -752,8 +753,8 @@ int main(int argc, char *argv[])
 
 // config frame
 	frameconf = gtk_frame_new("Configuration");
+	//gtk_widget_set_size_request(frameconf, 300, 50);
 	gtk_container_add(GTK_CONTAINER(fxbox), frameconf);
-	gtk_widget_set_size_request(frameconf, 300, 50);
 
 // horizontal box
 	confbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
@@ -985,5 +986,6 @@ int main(int argc, char *argv[])
 
 	close_videoplayerwidgets(&vpw1);
 	close_playlistparams(&plparams);
+
 	exit(0);
 }

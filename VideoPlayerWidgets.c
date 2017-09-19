@@ -103,25 +103,40 @@ void close_playlistparams(playlistparams *plparams)
 {
 }
 
+gboolean focus_iter_idle(gpointer data)
+{
+	GtkTreeModel *model;
+	GtkTreePath *tp;
+	vpwidgets *vpw = (vpwidgets *)data;
+
+	model = gtk_tree_view_get_model(GTK_TREE_VIEW(vpw->listview));
+	tp = gtk_tree_model_get_path(model, &(vpw->iter));
+	gtk_tree_view_set_cursor(GTK_TREE_VIEW(vpw->listview), tp, NULL, FALSE);
+	gtk_tree_path_free(tp);
+
+	return(FALSE);
+}
+
 gboolean play_next(vpwidgets *vpw)
 {
 	GtkTreeModel *model;
 	GtkTreeSelection *selection;
-	GtkTreeIter iter;
 
 	model = gtk_tree_view_get_model(GTK_TREE_VIEW(vpw->listview));
 	selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(vpw->listview));
 
-	gtk_tree_selection_get_selected(selection, &model, &iter);
-	if (gtk_tree_model_iter_next(model, &iter))
+	gtk_tree_selection_get_selected(selection, &model, &(vpw->iter));
+	if (gtk_tree_model_iter_next(model, &(vpw->iter)))
 	{
-		gtk_tree_selection_select_iter(selection, &iter);
+		//gtk_tree_selection_select_iter(selection, &(vpw->iter));
+		gdk_threads_add_idle(focus_iter_idle, (void*)vpw);
 	}
 	else
 	{
-		if (gtk_tree_model_iter_nth_child (model, &iter, NULL, 0))
+		if (gtk_tree_model_iter_nth_child(model, &(vpw->iter), NULL, 0))
 		{
-			gtk_tree_selection_select_iter(selection, &iter);
+			//gtk_tree_selection_select_iter(selection, &(vpw->iter));
+			gdk_threads_add_idle(focus_iter_idle, (void*)vpw);
 		}
 		else
 		{
@@ -135,7 +150,7 @@ gboolean play_next(vpwidgets *vpw)
 		g_free(vpw->vp.now_playing);
 		vpw->vp.now_playing = NULL;
 	}
-	gtk_tree_model_get(model, &iter, COL_FILEPATH, &(vpw->vp.now_playing), -1);
+	gtk_tree_model_get(model, &(vpw->iter), COL_FILEPATH, &(vpw->vp.now_playing), -1);
 	//g_print("Next %s\n", now_playing);
 
 	return TRUE;
@@ -145,24 +160,25 @@ gboolean play_prev(vpwidgets *vpw)
 {
 	GtkTreeModel *model;
 	GtkTreeSelection *selection;
-	GtkTreeIter iter;
 
 	model = gtk_tree_view_get_model(GTK_TREE_VIEW(vpw->listview));
 	selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(vpw->listview));
 
-	gtk_tree_selection_get_selected(selection, &model, &iter);
-	if (gtk_tree_model_iter_previous(model, &iter))
+	gtk_tree_selection_get_selected(selection, &model, &(vpw->iter));
+	if (gtk_tree_model_iter_previous(model, &(vpw->iter)))
 	{
-		gtk_tree_selection_select_iter(selection, &iter);
+		//gtk_tree_selection_select_iter(selection, &(vpw->iter));
+		gdk_threads_add_idle(focus_iter_idle, (void*)vpw);
 	}
 	else
 	{
-		gint nodecount = gtk_tree_model_iter_n_children (model, NULL);
+		gint nodecount = gtk_tree_model_iter_n_children(model, NULL);
 		if (nodecount)
 		{
-			if (gtk_tree_model_iter_nth_child (model, &iter, NULL, nodecount-1))
+			if (gtk_tree_model_iter_nth_child(model, &(vpw->iter), NULL, nodecount-1))
 			{
-				gtk_tree_selection_select_iter(selection, &iter);
+				//gtk_tree_selection_select_iter(selection, &(vpw->iter));
+				gdk_threads_add_idle(focus_iter_idle, (void*)vpw);
 			}
 			else
 			{
@@ -177,7 +193,7 @@ gboolean play_prev(vpwidgets *vpw)
 		g_free(vpw->vp.now_playing);
 		vpw->vp.now_playing = NULL;
 	}
-	gtk_tree_model_get(model, &iter, COL_FILEPATH, &(vpw->vp.now_playing), -1);
+	gtk_tree_model_get(model, &(vpw->iter), COL_FILEPATH, &(vpw->vp.now_playing), -1);
 	//g_print("Next %s\n", now_playing);
 
 	return TRUE;
@@ -385,6 +401,33 @@ static GtkTreeModel* create_and_fill_model(vpwidgets *vpw, int mode, int argc, c
 	return GTK_TREE_MODEL(vpw->store);
 }
 
+gboolean search_equal_func(GtkTreeModel *model, gint column, const gchar *key, GtkTreeIter *iter, gpointer search_data)
+{
+	gboolean valid;
+	gchararray gca;
+	vpwidgets *vpw = (vpwidgets *)search_data;
+
+	//printf("column %d, key %s\n", column, key);
+    for(valid=gtk_tree_model_get_iter_first(model, &(vpw->iter));valid;valid=gtk_tree_model_iter_next(model, &(vpw->iter)))
+	{
+		gtk_tree_model_get(model, &(vpw->iter), COL_FILEPATH, &gca, -1);
+		if (strstr((char*)gca, (char*)key))
+		{
+//printf("%s, %s\n", gca, key);
+			gdk_threads_add_idle(focus_iter_idle, (void*)vpw);
+			break;
+		}
+		g_free(gca);
+    }
+
+	return(FALSE); // found
+}
+
+void search_destroy(gpointer data)
+{
+	//g_free(data);
+}
+
 static GtkWidget* create_view_and_model(vpwidgets *vpw, int argc, char** argv)
 {
 	GtkCellRenderer *renderer;
@@ -407,6 +450,10 @@ static GtkWidget* create_view_and_model(vpwidgets *vpw, int argc, char** argv)
 		model = create_and_fill_model(vpw, 0, 0, NULL); // do not insert rows
 
 	gtk_tree_view_set_model(GTK_TREE_VIEW(view), model);
+
+	gtk_tree_view_set_enable_search (GTK_TREE_VIEW(view), TRUE);
+	gtk_tree_view_set_search_column(GTK_TREE_VIEW(view), COL_FILEPATH);
+	gtk_tree_view_set_search_equal_func(GTK_TREE_VIEW(view), search_equal_func, (void*)vpw, search_destroy);
 
 /* The tree view has acquired its own reference to the model, so we can drop ours. That way the model will
    be freed automatically when the tree view is destroyed */
@@ -487,6 +534,10 @@ static void button3_clicked(GtkWidget *button, gpointer data)
 	g_object_unref(model);
 	model = create_and_fill_model(vpw, 0, 0, NULL); // insert rows
 	gtk_tree_view_set_model(GTK_TREE_VIEW(vpw->listview), model); /* Re-attach model to view */
+
+	gtk_tree_view_set_enable_search (GTK_TREE_VIEW(vpw->listview), TRUE);
+	gtk_tree_view_set_search_column(GTK_TREE_VIEW(vpw->listview), COL_FILEPATH);
+	gtk_tree_view_set_search_equal_func(GTK_TREE_VIEW(vpw->listview), search_equal_func, (void*)vpw, search_destroy);
 }
 
 static void button4_clicked(GtkWidget *button, gpointer data)
@@ -503,6 +554,10 @@ static void button4_clicked(GtkWidget *button, gpointer data)
 	g_object_unref(model);
 	model = create_and_fill_model(vpw, 1, 0, NULL); // insert rows
 	gtk_tree_view_set_model(GTK_TREE_VIEW(vpw->listview), model); /* Re-attach model to view */
+
+	gtk_tree_view_set_enable_search (GTK_TREE_VIEW(vpw->listview), TRUE);
+	gtk_tree_view_set_search_column(GTK_TREE_VIEW(vpw->listview), COL_FILEPATH);
+	gtk_tree_view_set_search_equal_func(GTK_TREE_VIEW(vpw->listview), search_equal_func, (void*)vpw, search_destroy);
 }
 
 void listdir(const char *name, sqlite3 *db, int *id)
@@ -741,7 +796,10 @@ static void button8_clicked(GtkWidget *button, gpointer data)
 //g_print("Button 8 clicked\n");
 	button2_clicked(vpw->button2, data);
 	if (play_next(vpw))
+	{
 		button1_clicked(vpw->button1, data);
+		gdk_threads_add_idle(focus_iter_idle, (void*)vpw);
+	}
 }
 
 static void button9_clicked(GtkWidget *button, gpointer data)
@@ -751,7 +809,10 @@ static void button9_clicked(GtkWidget *button, gpointer data)
 //g_print("Button 9 clicked\n");
 	button2_clicked(vpw->button2, data);
 	if (play_prev(vpw))
+	{
 		button1_clicked(vpw->button1, data);
+		gdk_threads_add_idle(focus_iter_idle, (void*)vpw);
+	}
 }
 
 static void button10_clicked(GtkWidget *button, gpointer data)
@@ -1516,14 +1577,17 @@ void drag_data_received_da_event(GtkWidget *widget, GdkDragContext *context, gin
 {
 	playlistparams *plp = (playlistparams*)data;
 	vpwidgets *vpw = plp->vpw;
+	videoplayer *vp = &(vpw->vp);
+	videoplayerqueue *vpq = &(vp->vpq);
+	int i, itemcount, currentpage;
 
-//printf("drag_data_received\n");
-
-	//button3_clicked(vpw->button3, plp); // Clear list
-		
+//printf("drag_data_received\n");		
 	guchar *str = gtk_selection_data_get_text(selection_data);
 
-	int i = gtk_tree_model_iter_n_children(GTK_TREE_MODEL(vpw->store), NULL); // rows
+	if (!(currentpage = gtk_notebook_get_current_page(GTK_NOTEBOOK(vpw->notebook))))
+		button3_clicked(vpw->button3, plp); // Clear list
+
+	itemcount = i = gtk_tree_model_iter_n_children(GTK_TREE_MODEL(vpw->store), NULL); // rows
 	char *q;
 	char *p = (char *)str;
 	while(*p)
@@ -1546,6 +1610,27 @@ void drag_data_received_da_event(GtkWidget *widget, GdkDragContext *context, gin
 		p = q + 1;
 	}
 	g_free(str);
+
+	if (!itemcount)
+	{
+		if (vpq->playerstatus==PLAYING)
+			button2_clicked(vpw->button2, (void*)plp);
+		if (vpq->playerstatus==IDLE)
+		{
+			if (gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(vpw->store), &(vpw->iter), NULL, 0))
+			{
+				if (vp->now_playing)
+				{
+					g_free(vp->now_playing);
+					vp->now_playing = NULL;
+				}
+				gtk_tree_model_get(GTK_TREE_MODEL(vpw->store), &(vpw->iter), COL_FILEPATH, &(vp->now_playing), -1);
+				gdk_threads_add_idle(focus_iter_idle, (void*)vpw);
+				gtk_notebook_set_current_page(GTK_NOTEBOOK(vpw->notebook), 0);
+				button1_clicked(vpw->button1, (void*)plp);
+			}
+		}
+	}
 }
 
 gboolean drag_drop_da_event(GtkWidget *widget, GdkDragContext*context, gint x, gint y, guint time, gpointer data)
@@ -1568,8 +1653,25 @@ void drag_leave_da_event(GtkWidget *widget, GdkDragContext *context, guint time,
 static void buttonTest_clicked(GtkWidget *button, gpointer data)
 {
 	vpwidgets *vpw = (vpwidgets*)data;
-	videoplayer *vp = &(vpw->vp);
+	//videoplayer *vp = &(vpw->vp);
+	int width = 0, height = 0;
 
+	GtkAllocation* alloc = g_new(GtkAllocation, 1);
+
+	width+=2*gtk_container_get_border_width(GTK_CONTAINER(vpw->vpwindow));
+
+	height+=2*gtk_container_get_border_width(GTK_CONTAINER(vpw->vpwindow));
+	gtk_widget_get_allocation(vpw->hscale, alloc);
+	height+=alloc->height;
+	gtk_widget_get_allocation(vpw->statusbar, alloc);
+	height+=alloc->height;
+	height+=82;
+	g_free(alloc);
+
+	width+=1280;
+	height+=720;
+
+	gtk_window_resize(GTK_WINDOW(vpw->vpwindow), 1284, height);
 }
 */
 
@@ -1596,6 +1698,7 @@ void new_drawingarea(playlistparams *plp)
 	gtk_widget_set_size_request(vpw->drawingarea, vpw->playerWidth, vpw->playerHeight);
 	g_signal_connect(vpw->drawingarea, "realize", G_CALLBACK(realize_da_event), (void*)oi);
 	g_signal_connect(vpw->drawingarea, "draw", G_CALLBACK(draw_da_event), (void*)oi);
+	g_signal_connect(vpw->drawingarea, "size-allocate", G_CALLBACK(size_allocate_da_event), (void*)oi);
 	g_signal_connect(vpw->drawingarea, "destroy", G_CALLBACK(destroy_da_event), (void*)oi);
 
 	gtk_drag_dest_set(vpw->drawingarea, GTK_DEST_DEFAULT_ALL, vpw->target_entries, G_N_ELEMENTS(vpw->target_entries), GDK_ACTION_COPY | GDK_ACTION_MOVE );
@@ -1647,7 +1750,7 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
 	vpw->vpwindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_position(GTK_WINDOW(vpw->vpwindow), GTK_WIN_POS_CENTER);
 	/* Sets the border width of the window. */
-	gtk_container_set_border_width (GTK_CONTAINER (vpw->vpwindow), 2);
+	gtk_container_set_border_width(GTK_CONTAINER(vpw->vpwindow), 2);
 	//gtk_widget_set_size_request(vpw->vpwindow, 100, 100);
 	gtk_window_set_title(GTK_WINDOW(vpw->vpwindow), "Video Player");
 	//gtk_window_set_resizable(GTK_WINDOW(vpw->vpwindow), FALSE);
@@ -1657,23 +1760,23 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
      * titlebar), we ask it to call the delete_event () function
      * as defined above. The data passed to the callback
      * function is NULL and is ignored in the callback function. */
-	g_signal_connect(vpw->vpwindow, "delete-event", G_CALLBACK (vp_delete_event), (void*)vpw);
+	g_signal_connect(vpw->vpwindow, "delete-event", G_CALLBACK(vp_delete_event), (void*)vpw);
     
 	/* Here we connect the "destroy" event to a signal handler.  
      * This event occurs when we call gtk_widget_destroy() on the window,
      * or if we return FALSE in the "delete-event" callback. */
 	g_signal_connect(vpw->vpwindow, "destroy", G_CALLBACK(vp_destroy), (void*)vpw);
 
-	g_signal_connect(vpw->vpwindow, "realize", G_CALLBACK (vp_realize_cb), (void*)vpw);
+	g_signal_connect(vpw->vpwindow, "realize", G_CALLBACK(vp_realize_cb), (void*)vpw);
 //printf("realized\n");
 
 // vertical box
-	vpw->playerbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
+	vpw->playerbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
 	gtk_container_add(GTK_CONTAINER(vpw->vpwindow), vpw->playerbox);
 
 // box1 contents begin
 // vertical box
-	vpw->box1 = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
+	vpw->box1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
 
 // gl X11 drawing area
 	new_drawingarea(plp);
@@ -1693,7 +1796,7 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
 	gtk_container_add(GTK_CONTAINER(vpw->box1), vpw->horibox);
 
 // horizontal button box
-    vpw->button_box = gtk_button_box_new (GTK_ORIENTATION_HORIZONTAL);
+    vpw->button_box = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_button_box_set_layout((GtkButtonBox *)vpw->button_box, GTK_BUTTONBOX_START);
     gtk_container_add(GTK_CONTAINER(vpw->horibox), vpw->button_box);
 

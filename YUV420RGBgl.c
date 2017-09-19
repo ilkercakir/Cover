@@ -1407,6 +1407,14 @@ gboolean draw_da_event(GtkWidget *widget, cairo_t *cr, gpointer data)
 	return FALSE;
 }
 
+gboolean size_allocate_da_event(GtkWidget *widget, GdkRectangle *allocation, gpointer user_data)
+{
+	//oglidle *oi = (oglidle*)data;
+
+//printf("resize %d %d\n", allocation->width, allocation->height);
+	return FALSE;
+}
+
 void destroy_da_event(GtkWidget *widget, gpointer data)
 {
 	oglidle *oi = (oglidle*)data;

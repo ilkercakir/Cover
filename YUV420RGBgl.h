@@ -90,6 +90,7 @@ typedef struct
 
 void realize_da_event(GtkWidget *widget, gpointer data);
 gboolean draw_da_event(GtkWidget *widget, cairo_t *cr, gpointer data);
+gboolean size_allocate_da_event(GtkWidget *widget, GdkRectangle *allocation, gpointer user_data);
 void destroy_da_event(GtkWidget *widget, gpointer data);
 void reinit_ogl(oglidle *i, YUVformats fmt, int width, int height, int linewidth, int codecheight);
 void draw_texture(oglidle *i, char *buf);
