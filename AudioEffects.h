@@ -60,12 +60,8 @@ typedef struct
 	int inbuffersamples;
 	int inbufferframes;
 	int front, rear;
-	int *framepos;
-	int frameindex;
-	int framei;
-	int framesinT;
-
-	int readfront;
+	int framesinT, period, periods, peak, L, M;
+	char *lastframe;
 }soundvfo;
 
 typedef struct
@@ -180,11 +176,11 @@ void sounddelay_reinit(int N, dly_type delaytype, float millisec, float feedback
 void sounddelay_init(int N, dly_type delaytype, float millisec, float feedback, snd_pcm_format_t format, unsigned int rate, unsigned int channels, sounddelay *s);
 void sounddelay_add(char* inbuffer, int inbuffersize, sounddelay *s);
 void sounddelay_close(sounddelay *s);
-void soundvfo_init(float vfofreq, float vfodepth, int invertphase, snd_pcm_format_t format, unsigned int rate, unsigned int channels, soundvfo *v);
+void soundvfo_init(float vfofreq, float vfodepth, snd_pcm_format_t format, unsigned int rate, unsigned int channels, soundvfo *v);
 void soundvfo_add(char* inbuffer, int inbuffersize, soundvfo *v);
 void soundvfo_close(soundvfo *v);
-void soundmod_reinit(float modfreq, float moddepth, int invertphase, soundmod *m);
-void soundmod_init(float modfreq, float moddepth, int invertphase, snd_pcm_format_t format, unsigned int rate, unsigned int channels, soundmod *m);
+void soundmod_reinit(float modfreq, float moddepth, soundmod *m);
+void soundmod_init(float modfreq, float moddepth, snd_pcm_format_t format, unsigned int rate, unsigned int channels, soundmod *m);
 void soundmod_add(char* inbuffer, int inbuffersize, soundmod *m);
 void soundmod_close(soundmod *m);
 void set_reverbeq(eqdefaults *d);

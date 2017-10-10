@@ -142,27 +142,22 @@ void sounddelay_close(sounddelay *s)
 
 // VFO
 
-void soundvfo_init(float vfofreq, float vfodepth, int invertphase, snd_pcm_format_t format, unsigned int rate, unsigned int channels, soundvfo *v)
+void soundvfo_init(float vfofreq, float vfodepth, snd_pcm_format_t format, unsigned int rate, unsigned int channels, soundvfo *v)
 {
 	v->format = format;
 	v->rate = rate;
 	v->channels = channels;
 	v->vfofreq = vfofreq;
 	v->vfodepth = vfodepth;
-	v->invertphase = invertphase;
 
 	v->vfobuf = NULL;
-	v->rear = v->front = 0;
-	v->framepos = NULL;
-	v->framei = 0;
-	v->frameindex = 0;
-
-	v->readfront = 0;
+	v->rear = v->front = 0;	
 }
 
 void soundvfo_add(char* inbuffer, int inbuffersize, soundvfo *v)
 {
-	float thetapos, thetaneg, tpos, tneg;
+	int i, j, delta, index;
+	float frac, ix;
 
 	if (v->enabled)
 	{
@@ -171,79 +166,104 @@ void soundvfo_add(char* inbuffer, int inbuffersize, soundvfo *v)
 			v->physicalwidth = snd_pcm_format_width(v->format);
 			v->framebytes = v->physicalwidth / 8 * v->channels;
 			v->inbufferframes = inbuffersize / v->framebytes;
-			//v->N = ceil(v->inbufferframes * v->vfodepth);
-			v->N = ceil((float)v->rate/v->vfofreq*v->vfodepth);
 			v->inbuffersamples = v->inbufferframes * v->channels;
-			v->vfobufframes = v->inbufferframes + v->N;
-			v->vfobuf = malloc(v->vfobufframes * v->framebytes);
+			v->framesinT = (int)((float)v->rate / v->vfofreq);
+			v->periods = v->framesinT / v->inbufferframes;
+			v->periods = (v->periods>>2)<<2; // Multiple of 4
+			v->period = 0;
+
+			v->lastframe = malloc(v->channels*v->physicalwidth);
+			signed short *lf = (signed short *)v->lastframe;
+			for(j=0;j<v->channels;j++)
+				lf[j] = 0;
+				
+			v->peak = v->inbufferframes * v->vfodepth;
+			v->vfobufframes = v->inbufferframes;
+			for(i=0;i<v->periods>>1;i++) // simulate half modulation period
+			{
+				delta = (int)(((float)v->peak)*sin((float)i*2.0*M_PI/(float)v->periods));
+				v->vfobufframes += delta;
+			}
+			//printf("peak %d periods %d vfobufframes %d\n", v->peak, v->periods, v->vfobufframes);
 			v->vfobufsamples = v->vfobufframes * v->channels;
-			memset(v->vfobuf, 0, v->vfobufframes * v->framebytes);
-			v->framepos = malloc(2*v->N*sizeof(int));
-			int k;
-			for(k=1;k<=v->N;k++)
-			{
-				thetapos = acos(1.0-2.0*k/v->N);
-				tpos = thetapos / (2 * M_PI * v->vfofreq);
-				v->framepos[k-1] = round(tpos * v->rate);
-			}
-			for(k=1;k<v->N;k++)
-			{
-				thetaneg = 2 * M_PI - acos(1.0-2.0*k/v->N);
-				tneg = thetaneg / (2 * M_PI * v->vfofreq);
-				v->framepos[2*v->N-1-k] = round(tneg * v->rate);
-			}
-			tneg = 1.0 / v->vfofreq;
-			v->framesinT = v->framepos[2*v->N-1] = round(tneg * v->rate);
+			v->vfobuf = malloc(v->vfobufsamples*v->physicalwidth);
 
-			v->framepos[2*v->N-1] = v->framesinT - 1;
-
-			if (v->invertphase)
-				v->frameindex = v->N;
-			//printf("frames to add %d, frames in T %d\n", v->N, v->framesinT);
+			v->L = v->inbufferframes;
+			//printf("channels %d\n", v->channels);
 		}
 
-		int i, j, k, frameposition;
-		frameposition = v->framepos[v->frameindex];
 		signed short *inshort, *vfshort;
 		inshort = (signed short *)inbuffer;
 		vfshort = (signed short *)v->vfobuf;
-		for(i=0;i<v->inbufferframes;i++)
-		{
-			if (v->framei >= frameposition) // +- frame at this position
-			{
-				if (((v->frameindex < v->N) && (!v->invertphase))
-				 || ((v->frameindex >= v->N) && (v->invertphase))) // +
-				{
-					//vfshort[v->rear++] = inshort[i*v->channels]; // L
-					//vfshort[v->rear++] = inshort[i*v->channels+1]; // R
-					for(j=0,k=i*v->channels;j<v->channels;j++)
-						vfshort[v->rear++] = inshort[k++];
-					v->rear %= v->vfobufsamples;
 
-					//vfshort[v->rear++] = inshort[i*v->channels]; // L
-					//vfshort[v->rear++] = inshort[i*v->channels+1]; // R
-					for(j=0,k=i*v->channels;j<v->channels;j++)
-						vfshort[v->rear++] = inshort[k++];
-					v->rear %= v->vfobufsamples;
-				}
-				else // -
-				{
-				}
-				v->frameindex++;
-				v->frameindex%=2*v->N;
-				frameposition = v->framepos[v->frameindex];
-			}
-			else
+		if (v->period<v->periods>>1)
+			delta = (int)(((float)v->peak)*sin((float)v->period*2.0*M_PI/(float)v->periods));
+		else
+			delta = -(int)(((float)v->peak)*sin((float)(v->period-(v->periods>>1))*2.0*M_PI/(float)v->periods));
+
+		v->M = v->L + delta;
+//printf("M %d L %d ", v->M, v->L);
+		if (v->M>v->L) // interpolation
+		{
+			//printf("interpolating period %d\n", v->period);
+			frac = (float)v->L/(float)v->M;
+			for(j=0;j<v->channels;j++) // frame 1
 			{
-				//vfshort[v->rear++] = inshort[i*v->channels]; // L
-				//vfshort[v->rear++] = inshort[i*v->channels+1]; // R
-				for(j=0,k=i*v->channels;j<v->channels;j++)
-					vfshort[v->rear++] = inshort[k++];
+				vfshort[v->rear++] = ((float)inshort[j])*frac + ((float)v->lastframe[j])*(1.0-frac);
+			}
+			v->rear %= v->vfobufsamples;
+			for(i=2;i<v->M;i++) // frame 2 .. M-1
+			{
+				ix = (float)(i*v->L)/(float)v->M;
+				index = (int)ix; frac = ix - (float)index;
+				for(j=0;j<v->channels;j++)
+				{
+					vfshort[v->rear++] = ((float)inshort[index*v->channels+j])*frac + ((float)inshort[(index-1)*v->channels+j])*(1.0-frac);
+				}
 				v->rear %= v->vfobufsamples;
 			}
-			v->framei++;
-			v->framei %= v->framesinT;
+			for(j=0;j<v->channels;j++) // frame M
+			{
+				v->lastframe[j] = vfshort[v->rear++] = (float)inshort[(v->L-1)*v->channels+j];
+			}
+			v->rear %= v->vfobufsamples;
 		}
+		else if (v->M<v->L) // decimation
+		{
+			//printf("decimating period %d\n", v->period);
+			for(i=1;i<v->M;i++) // frame 1 .. M-1
+			{
+				ix = (float)(i*v->L)/(float)v->M;
+				index = (int)ix; frac = ix - (float)index;
+				for(j=0;j<v->channels;j++)
+				{
+					vfshort[v->rear++] = ((float)inshort[(index-1)*v->channels+j])*(1.0-frac) + ((float)inshort[index*v->channels+j])*frac;
+				}
+				v->rear %= v->vfobufsamples;
+			}
+			for(j=0;j<v->channels;j++) // frame M
+			{
+				v->lastframe[j] = vfshort[v->rear++] = (float)inshort[(v->L-1)*v->channels+j];
+			}
+			v->rear %= v->vfobufsamples;
+		}
+		else // copy
+		{
+			//printf("copying period %d\n", v->period); 
+			for(i=0;i<v->inbufferframes;i++)
+			{
+				for(j=0;j<v->channels;j++)
+					vfshort[v->rear++] = inshort[i*v->channels+j];
+				v->rear %= v->vfobufsamples;
+			}
+			for(j=0;j<v->channels;j++) // frame L
+			{
+				v->lastframe[j] = (float)inshort[(v->L-1)*v->channels+j];
+			}
+		}
+
+		v->period++;
+		v->period %= v->periods;
 	}
 }
 
@@ -253,22 +273,22 @@ void soundvfo_close(soundvfo *v)
 	{
 		free(v->vfobuf);
 		v->vfobuf = NULL;
-		free(v->framepos);
-		v->framepos = NULL;
+		free(v->lastframe);
+		v->lastframe = NULL;
 	}
 }
 
 // Modulator
 
-void soundmod_reinit(float modfreq, float moddepth, int invertphase, soundmod *m)
+void soundmod_reinit(float modfreq, float moddepth, soundmod *m)
 {
 	soundvfo_close(&(m->v));
 	m->modfreq = modfreq;
 	m->moddepth = moddepth;
-	soundvfo_init(modfreq, moddepth, invertphase, m->format, m->rate, m->channels, &(m->v));
+	soundvfo_init(modfreq, moddepth, m->format, m->rate, m->channels, &(m->v));
 }
 
-void soundmod_init(float modfreq, float moddepth, int invertphase, snd_pcm_format_t format, unsigned int rate, unsigned int channels, soundmod *m)
+void soundmod_init(float modfreq, float moddepth, snd_pcm_format_t format, unsigned int rate, unsigned int channels, soundmod *m)
 {
 	int ret;
 
@@ -281,7 +301,7 @@ void soundmod_init(float modfreq, float moddepth, int invertphase, snd_pcm_forma
 	if((ret=pthread_mutex_init(&(m->modmutex), NULL))!=0 )
 		printf("mod mutex init failed, %d\n", ret);
 
-	soundvfo_init(modfreq, moddepth, invertphase, format, rate, channels, &(m->v));
+	soundvfo_init(modfreq, moddepth, format, rate, channels, &(m->v));
 }
 
 void soundmod_add(char* inbuffer, int inbuffersize, soundmod *m)
@@ -295,11 +315,11 @@ void soundmod_add(char* inbuffer, int inbuffersize, soundmod *m)
 		soundvfo_add(inbuffer, inbuffersize, &(m->v));
 		inshort = (signed short *)inbuffer;
 		vfshort = (signed short *)m->v.vfobuf;
-		for(i=0;i<m->v.inbuffersamples;)
+		for(i=0;i<m->v.inbufferframes;i++)
 		{
 			for(j=0;j<m->channels;j++)
-				inshort[i++] = vfshort[m->v.readfront++];
-			m->v.readfront %= m->v.vfobufsamples;
+				inshort[i*m->channels+j] = vfshort[m->v.front++];
+			m->v.front %= m->v.vfobufsamples;
 		}
 	}
 	pthread_mutex_unlock(&(m->modmutex));
@@ -572,7 +592,7 @@ void soundcho_init(int maxcho, snd_pcm_format_t format, unsigned int rate, unsig
 	for(i=0;i<maxcho;i++)
 	{
 		c->v[i].enabled = 1;
-		soundvfo_init(chofreq[i], chodepth[i], 0, format, rate, channels, &(c->v[i]));
+		soundvfo_init(chofreq[i], chodepth[i], format, rate, channels, &(c->v[i]));
 	}
 	if((ret=pthread_mutex_init(&(c->chomutex), NULL))!=0 )
 		printf("cho mutex init failed, %d\n", ret);
@@ -600,8 +620,8 @@ void soundcho_add(char* inbuffer, int inbuffersize, soundcho *c)
 			for(i=0;i<c->v[j].inbuffersamples;)
 			{
 				for(k=0;k<c->channels;k++)
-					inshort[i++] += vfshort[c->v[j].readfront++]*prescale;
-				c->v[j].readfront %= c->v[j].vfobufsamples;
+					inshort[i++] += vfshort[c->v[j].front++]*prescale;
+				c->v[j].front %= c->v[j].vfobufsamples;
 			}
 		}
 	}

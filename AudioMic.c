@@ -65,7 +65,7 @@ int init_audio_hw_mic(microphone *m)
 		if (snd_pcm_hw_params_test_channels(m->capture_handle, m->hw_params, m->micchannels) == 0)
 		{
 			break;
-//printf("supported input channels: %d\n", i);
+printf("supported input channels: %d\n", m->micchannels);
 		}
 	}
 
@@ -160,7 +160,7 @@ void haas_init(michaas *h, int enabled, float millisec, snd_pcm_format_t format,
 	h->monobuffer = (signed short *)h->mbuffer;
 
 	h->sndmod.enabled = modenabled;
-	soundmod_init(modrate, moddepth, 0, format, rate, mono, &(h->sndmod));
+	soundmod_init(modrate, moddepth, format, rate, mono, &(h->sndmod));
 }
 /*
 void haas_init(michaas *h, int enabled, float millisec, snd_pcm_format_t format, unsigned int rate, int inbuffersize, char *inbuffer, int modenabled, float modrate, float moddepth)
@@ -204,8 +204,10 @@ void haas_add(michaas *h)
 	pthread_mutex_lock(h->haasmutex);
 	if (h->haasenabled)
 	{
-		memcpy(h->delayed, h->delayed+h->inbuffersize, h->delaybytes); // Delay R
-		memcpy(h->delayed+h->delaybytes, (char *)h->monobuffer, h->inbuffersize);
+		//memcpy(h->delayed, h->delayed+h->inbuffersize, h->delaybytes); // Delay R
+		for(i=0;i<h->delaybytes;i++)
+			h->delayed[i]=h->delayed[h->inbuffersize+i];
+		memcpy(h->delayed+h->delaybytes, h->mbuffer, h->inbuffersize);
 
 		soundmod_add(h->delayed, h->inbuffersize, &(h->sndmod)); // Modulate R
 

@@ -24,7 +24,7 @@
 
 /*
 compile with gcc -Wall -c "%f" -DUSE_OPENGL -DSTANDALONE -D__STDC_CONSTANT_MACROS -D__STDC_LIMIT_MACROS -DTARGET_POSIX -D_LINUX -fPIC -DPIC -D_REENTRANT -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -U_FORTIFY_SOURCE -g -ftree-vectorize -pipe -Wno-psabi $(pkg-config --cflags libavcodec libavformat libavutil libswscale libswresample) $(pkg-config --cflags gtk+-3.0) -Wno-deprecated-declarations
-link with gcc -Wall -o "%e" "%f" AudioDev.o AudioEffects.o AudioMic.o AudioMixer.o AudioPipe.o AudioSpk.o BiQuad.o VideoPlayerWidgets.o VideoPlayer.o VideoQueue.o YUV420RGBgl.o -Wl,--whole-archive -Wl,--no-whole-archive -rdynamic $(pkg-config --cflags gtk+-3.0) $(pkg-config --libs libavcodec libavformat libavutil libswscale libswresample) -lpthread -lrt -ldl -lm -lGL $(pkg-config --libs gtk+-3.0) -lasound $(pkg-config --libs gtk+-3.0) $(pkg-config --libs sqlite3)
+link with gcc -Wall -o "%e" "%f" AudioDev.o AudioEffects.o AudioMic.o AudioMixer.o AudioPipe.o AudioSpk.o BiQuad.o VideoPlayerWidgets.o VideoPlayer.o VideoQueue.o YUV420RGBgl.o -Wl,--whole-archive -Wl,--no-whole-archive -rdynamic $(pkg-config --cflags gtk+-3.0) $(pkg-config --libs libavcodec libavformat libavutil libswscale libswresample) -lpthread -lrt -ldl -lm -lGL -lX11 $(pkg-config --libs gtk+-3.0) -lasound $(pkg-config --libs gtk+-3.0) $(pkg-config --libs sqlite3)
  */
 
 #define _GNU_SOURCE
@@ -510,7 +510,7 @@ static void modfreq_changed(GtkWidget *widget, gpointer data)
 
 	pthread_mutex_lock(&(m->mh.sndmod.modmutex));
 	float modfreq = (float)gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
-	soundmod_reinit(modfreq, m->mh.sndmod.moddepth, m->mh.sndmod.v.invertphase, &(m->mh.sndmod));
+	soundmod_reinit(modfreq, m->mh.sndmod.moddepth, &(m->mh.sndmod));
 	pthread_mutex_unlock(&(m->mh.sndmod.modmutex));
 }
 
@@ -520,7 +520,7 @@ static void moddepth_changed(GtkWidget *widget, gpointer data)
 
 	pthread_mutex_lock(&(m->mh.sndmod.modmutex));
 	float moddepth = (float)gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
-	soundmod_reinit(m->mh.sndmod.modfreq, moddepth, m->mh.sndmod.v.invertphase, &(m->mh.sndmod));
+	soundmod_reinit(m->mh.sndmod.modfreq, moddepth, &(m->mh.sndmod));
 	pthread_mutex_unlock(&(m->mh.sndmod.modmutex));
 }
 
@@ -840,11 +840,11 @@ int main(int argc, char *argv[])
 	gtk_container_add(GTK_CONTAINER(haas1.haasbox1), haas1.spinbutton14);
 
 // depth
-	mic.mh.sndmod.moddepth = 0.003;
+	mic.mh.sndmod.moddepth = 0.02;
 	haas1.modlabel2 = gtk_label_new("Depth");
 	gtk_widget_set_size_request(haas1.modlabel2, 100, 30);
 	gtk_container_add(GTK_CONTAINER(haas1.haasbox1), haas1.modlabel2);
-	haas1.spinbutton15 = gtk_spin_button_new_with_range(0.001, 0.100, 0.001);
+	haas1.spinbutton15 = gtk_spin_button_new_with_range(0.001, 0.900, 0.001);
 	gtk_widget_set_size_request(haas1.spinbutton15, 120, 30);
 	gtk_spin_button_set_value(GTK_SPIN_BUTTON(haas1.spinbutton15), mic.mh.sndmod.moddepth);
 	g_signal_connect(GTK_SPIN_BUTTON(haas1.spinbutton15), "value-changed", G_CALLBACK(moddepth_changed),&mic);
