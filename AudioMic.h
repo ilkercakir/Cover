@@ -52,6 +52,7 @@ typedef struct
 	int buffersize, bufferframes, buffersamples;
 	int capturebuffersize;
 	michaas mh;
+	int nullsamples;
 }microphone;
 
 int init_audio_hw_mic(microphone *m);

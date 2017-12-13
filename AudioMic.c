@@ -328,12 +328,15 @@ int read_mic(microphone *m)
 	signed short *src = (signed short *)m->micbuffer;
 	signed short *dest = (signed short *)m->buffer;
 	memset(m->buffer, 0, m->buffersize);
-	for(i=0;i<m->micbufferframes;i++)
+	if (!m->nullsamples)
 	{
-		dest[i] = 0;
-		for(j=0;j<m->micchannels;j++)
+		for(i=0;i<m->micbufferframes;i++)
 		{
-			dest[i] += src[i*m->micchannels+j] * m->prescale;
+			dest[i] = 0;
+			for(j=0;j<m->micchannels;j++)
+			{
+				dest[i] += src[i*m->micchannels+j] * m->prescale;
+			}
 		}
 	}
 

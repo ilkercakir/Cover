@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Encoding=UTF-8
+Name=Cover
+Comment=Cover
+Exec=/home/pi/Desktop/C/Cover/Cover %F
+Icon=/home/pi/Desktop/C/Cover/Garage-Band-icon.png
+Terminal=false
+Path=/home/pi/Desktop/C/Cover
+GenericName=Cover
+StartupNotify=false
+Name[tr_TR]=Cover
+Categories=GNOME;GTK;Audio;Video
+

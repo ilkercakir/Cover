@@ -22,6 +22,7 @@
  */
 
 #include "VideoPlayerWidgets.h"
+
 char* strreplace(char *src, char *search, char *replace)
 {
 	char *p;
@@ -90,9 +91,11 @@ static int nomediafile(char *filepath)
 	);
 }
 
-void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, int vqMaxLength, int aqMaxLength, int spk_samplingrate, int thread_count)
+void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, microphone *mic, speaker *spk, int vqMaxLength, int aqMaxLength, int spk_samplingrate, int thread_count)
 {
 	plparams->vpw = vpw;
+	plparams->mic = mic;
+	plparams->spk = spk;
 	plparams->vqMaxLength = vqMaxLength;
 	plparams->aqMaxLength = aqMaxLength;
 	plparams->thread_count = thread_count;
@@ -1434,6 +1437,15 @@ gboolean update_hscale(gpointer data)
 	return FALSE;
 }
 
+static void micnull_toggled(GtkWidget *togglebutton, gpointer data)
+{
+	playlistparams *plp = (playlistparams*)data;
+	microphone *mic = plp->mic;
+
+	mic->nullsamples = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(togglebutton));
+	//printf("toggle state %d\n", gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(togglebutton)));
+}
+
 /*
 gboolean setLevel1(gpointer data)
 {
@@ -2105,6 +2117,23 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
 
 // eqvbox contents end
 
+// Mixer box contents
+// vertical box
+	vpw->mixvbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+
+// horizontal box    
+	vpw->mixhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+	//gtk_container_add(GTK_CONTAINER(vpw->mixvbox), vpw->mixhbox);
+	gtk_box_pack_start(GTK_BOX(vpw->mixvbox), vpw->mixhbox, TRUE, TRUE, 0);
+
+// checkbox
+	plp->mic->nullsamples = FALSE;
+	vpw->micnull = gtk_check_button_new_with_label("Mute Microphone");
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(vpw->micnull), plp->mic->nullsamples);
+	g_signal_connect(GTK_TOGGLE_BUTTON(vpw->micnull), "toggled", G_CALLBACK(micnull_toggled), (void*)plp);
+	gtk_container_add(GTK_CONTAINER(vpw->mixhbox), vpw->micnull);
+// Mixer box contents end
+
 /*
 // stack switcher
     vpw->stack = gtk_stack_new();
@@ -2124,6 +2153,8 @@ void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int pla
 	gtk_notebook_append_page(GTK_NOTEBOOK(vpw->notebook), vpw->box2, vpw->nbpage2);
 	vpw->nbpage3 = gtk_label_new("Equalizer");
 	gtk_notebook_append_page(GTK_NOTEBOOK(vpw->notebook), vpw->eqvbox, vpw->nbpage3);
+	vpw->nbpage4 = gtk_label_new("Mixer");
+	gtk_notebook_append_page(GTK_NOTEBOOK(vpw->notebook), vpw->mixvbox, vpw->nbpage4);
 	g_signal_connect(GTK_NOTEBOOK(vpw->notebook), "switch-page", G_CALLBACK(page_switched), (void*)vpw);
 	//gtk_container_add(GTK_CONTAINER(vpw->playerbox), vpw->notebook);
 	gtk_box_pack_start(GTK_BOX(vpw->playerbox), vpw->notebook, TRUE, TRUE, 0);
@@ -2358,4 +2389,252 @@ void vpw_commandline(playlistparams *plp, int argcount)
 
 		gdk_threads_add_idle(setnotebooktab1, vpw);
 	}
+}
+
+gpointer singleinstancethread(gpointer args)
+{
+	int ctype = PTHREAD_CANCEL_ASYNCHRONOUS;
+	int ctype_old;
+	pthread_setcanceltype(ctype, &ctype_old);
+
+	playlistparams *plp = (playlistparams *)args;
+	vpwidgets *vpw = plp->vpw;
+	videoplayer *vp = &(vpw->vp);
+	videoplayerqueue *vpq = &(vp->vpq);
+	instancesock *s = &(vpw->sisocket);
+
+	struct ifaddrs *addrs, *tmp;
+	char *buffer;
+	wchar_t *wcharbuf;
+	wchar_t *filename;
+	int readpos, writepos, bytesread, bytestoread, totalbytesread, wcharsread, err;
+	int itemcount, i;
+	char *path;
+
+	s->sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (s->sockfd < 0)
+	{
+		wprintf(L"Error opening socket\n");
+	}
+	else
+	{
+		memset((char *)&(s->serv_addr), 0, sizeof(s->serv_addr));
+
+		s->serv_addr.sin_family = AF_INET;
+		s->serv_addr.sin_addr.s_addr = INADDR_ANY;
+		s->serv_addr.sin_port = htons(s->portno);
+		if (bind(s->sockfd, (struct sockaddr *)&(s->serv_addr), sizeof(s->serv_addr)) < 0)
+		{
+			// Multiple instance
+			s->single = 0;
+
+			pthread_mutex_lock(s->simutex);
+			s->binddone = 1;
+			pthread_cond_signal(s->sicond);
+			pthread_mutex_unlock(s->simutex);
+
+			// Pass parameters to the other instance
+			getifaddrs(&addrs);
+			tmp = addrs;
+			while (tmp) 
+			{
+				if (tmp->ifa_addr && tmp->ifa_addr->sa_family == AF_INET)
+				{
+					struct sockaddr_in *pAddr = (struct sockaddr_in *)tmp->ifa_addr;
+					//wprintf(L"%s: %s\n", tmp->ifa_name, inet_ntoa(pAddr->sin_addr));
+
+					bzero((char *)&(s->serv_addr), sizeof(s->serv_addr));
+					s->serv_addr.sin_family = AF_INET;
+					bcopy((char *)&(pAddr->sin_addr), (char *)&(s->serv_addr.sin_addr.s_addr), sizeof(pAddr->sin_addr));
+					s->serv_addr.sin_port = htons(s->portno);
+					if (connect(s->sockfd, (struct sockaddr *)&(s->serv_addr), sizeof(s->serv_addr)) < 0)
+					{
+						perror("connect error");
+						//wprintf(L"Error connecting to %s: %s\n", tmp->ifa_name, inet_ntoa(s->serv_addr.sin_addr));
+					}
+					else // send
+					{
+						//wprintf(L"connected to %s: %s port %d\n", tmp->ifa_name, inet_ntoa(s->serv_addr.sin_addr), ntohs(s->serv_addr.sin_port));
+
+						//wprintf(L"argc %d\n", s->argc);
+						filename = malloc(s->pathlength*sizeof(wchar_t));
+
+						for(readpos=1;readpos<s->argc;readpos++)
+						{
+							wcharsread = mbstowcs(filename, s->argv[readpos], s->pathlength);
+							//wprintf(L"%ls converted %d length %d\n", filename, wcharsread, (int)wcslen(filename));
+
+							if ((bytesread=write(s->sockfd, filename, ((int)wcslen(filename) + 1)*sizeof(wchar_t)))>0)
+							{
+								//wprintf(L"written %d bytes\n", bytesread);
+							}
+							else
+							{
+								wprintf(L"Error writing to socket\n");
+							}
+						}
+
+						free(filename);
+						break;
+					}
+
+				}
+				tmp = tmp->ifa_next;
+			}
+			freeifaddrs(addrs);
+
+			close(s->sockfd);
+		}
+		else
+		{
+			// Single instance
+			s->single = 1;
+
+			pthread_mutex_lock(s->simutex);
+			s->binddone = 1;
+			pthread_cond_signal(s->sicond);
+			pthread_mutex_unlock(s->simutex);
+
+			listen(s->sockfd, s->num_pending_connections);
+			s->clilen = sizeof(s->cli_addr);
+
+			while (1)
+			{
+				s->newsockfd = accept(s->sockfd, (struct sockaddr *)&(s->cli_addr), &(s->clilen));
+				if (s->newsockfd < 0)
+				{
+					wprintf(L"Error on accept\n");
+				}
+				else
+				{
+					//getpeername(s->newsockfd, (struct sockaddr *)&(s->cli_addr), &(s->clilen));
+					//wprintf(L"client connected %s port %d\n", (char *)inet_ntoa(s->cli_addr.sin_addr), ntohs(s->serv_addr.sin_port));
+					path = malloc(s->pathlength);
+					filename = malloc(s->pathlength*sizeof(wchar_t));
+					buffer = malloc(s->buffersize);
+					wcharbuf = (wchar_t *)buffer;
+					writepos = readpos = totalbytesread = 0;
+					err = 0;
+					do
+					{
+						bytestoread = s->buffersize - totalbytesread;
+						if ((bytesread=read(s->newsockfd, buffer+totalbytesread, bytestoread))>0)
+						{
+							//wprintf(L"read %d bytes\n", bytesread);
+							totalbytesread += bytesread;
+							for(wcharsread = (totalbytesread - readpos*sizeof(wchar_t)) / sizeof(wchar_t);wcharsread;wcharsread--)
+							{
+								//wprintf(L"writing to pos %d\n", writepos);
+								if ((filename[writepos++]=wcharbuf[readpos++]))
+								{
+									if (writepos>=s->pathlength)
+									{
+										//wprintf(L"path longer than %d \n", pathlength);
+										bytesread = -1; writepos = readpos = totalbytesread = 0;
+										err = 1;
+										break;
+									}
+								}
+								else
+								{
+									//wprintf(L"%ls\n", filename);
+									i = wcstombs(path, filename, s->pathlength);
+									itemcount = i = gtk_tree_model_iter_n_children(GTK_TREE_MODEL(vpw->store), NULL); // rows
+									if (nomediafile(path))
+									{}
+									else
+									{
+										gtk_list_store_append(vpw->store, &(vpw->iter));
+										gtk_list_store_set(vpw->store, &(vpw->iter), COL_ID, i++, COL_FILEPATH, path, -1);
+									}
+
+									if (!itemcount)
+									{
+										if (vpq->playerstatus==PLAYING)
+											button2_clicked(vpw->button2, (void*)plp);
+										if (vpq->playerstatus==IDLE)
+										{
+											if (gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(vpw->store), &(vpw->iter), NULL, 0))
+											{
+												if (vp->now_playing)
+												{
+													g_free(vp->now_playing);
+													vp->now_playing = NULL;
+												}
+												gtk_tree_model_get(GTK_TREE_MODEL(vpw->store), &(vpw->iter), COL_FILEPATH, &(vp->now_playing), -1);
+												gdk_threads_add_idle(focus_iter_idle, (void*)vpw);
+												gtk_notebook_set_current_page(GTK_NOTEBOOK(vpw->notebook), 0);
+												button1_clicked(vpw->button1, (void*)plp);
+											}
+										}
+									}
+
+									writepos = 0;
+								}
+							}
+							readpos %= ( s->buffersize / sizeof(wchar_t));
+							totalbytesread %= s->buffersize;
+						}
+						else
+							break;
+					}while(!err);
+
+					free(buffer);
+					free(filename);
+					free(path);
+				}
+				close(s->newsockfd);
+			}
+		}
+	}
+
+	s->retval = 0;
+	pthread_exit(&(s->retval));
+}
+
+int singleinstance(playlistparams *plp, int portno, int argc, char **argv)
+{
+	vpwidgets *vpw = plp->vpw;
+	instancesock *s = &(vpw->sisocket);
+	int ret;
+
+	s->portno = portno;
+	s->argc = argc;
+	s->argv = argv;
+	s->binddone = 0;
+	s->num_pending_connections = 5;
+	s->buffersize = 256;
+	s->pathlength = 2048;
+	s->simutex = malloc(sizeof(pthread_mutex_t));
+	if((ret=pthread_mutex_init(s->simutex, NULL))!=0 )
+		wprintf(L"single instance mutex init failed, %d\n", ret);
+	s->sicond = malloc(sizeof(pthread_cond_t));
+	if((ret=pthread_cond_init(s->sicond, NULL))!=0 )
+		wprintf(L"single instance cond init failed, %d\n", ret);
+
+	ret = pthread_create(&(s->tid), NULL, &singleinstancethread, plp);
+	if (ret)
+	{}
+
+	pthread_mutex_lock(s->simutex);
+	while (!s->binddone)
+		pthread_cond_wait(s->sicond, s->simutex);
+	pthread_mutex_unlock(s->simutex);
+
+	if (s->single)
+	{
+	}
+	else
+	{
+		if ((ret=pthread_join(s->tid, NULL)))
+			wprintf(L"pthread_join error, %d\n", ret);
+	}
+
+	pthread_mutex_destroy(s->simutex);
+	free(s->simutex);
+
+	pthread_cond_destroy(s->sicond);
+	free(s->sicond);
+
+	return(s->single);
 }

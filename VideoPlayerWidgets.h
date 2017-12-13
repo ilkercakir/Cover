@@ -7,6 +7,16 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <pthread.h>
+#include <string.h>
+#include <strings.h>
+#include <sys/types.h> 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <wchar.h>
+#include <locale.h>
 
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
@@ -15,6 +25,8 @@
 
 #include <sqlite3.h>
 
+#include "AudioMic.h"
+#include "AudioSpk.h"
 #include "AudioMixer.h"
 #include "VideoPlayer.h"
 
@@ -23,6 +35,23 @@ typedef enum
 	text_html,
 	string
 }target_info;
+
+typedef struct
+{
+	int sockfd, newsockfd, portno;
+	unsigned int clilen;
+	struct sockaddr_in serv_addr, cli_addr;
+	pthread_t tid;
+	int retval;
+	pthread_mutex_t *simutex;
+	pthread_cond_t *sicond;
+	int single, binddone;
+	int argc;
+	char** argv;
+	int num_pending_connections;
+	int buffersize; // bytes, N*sizeof(wchar_t)
+	int pathlength; // wchar_t
+}instancesock;
 
 typedef struct
 {
@@ -157,10 +186,14 @@ GtkWidget *label5;
 GtkWidget *label6;
 GtkWidget *label7;
 */
+GtkWidget *mixvbox;
+GtkWidget *mixhbox;
+GtkWidget *micnull;
 GtkWidget *notebook;
 GtkWidget *nbpage1;
 GtkWidget *nbpage2;
 GtkWidget *nbpage3;
+GtkWidget *nbpage4;
 
 int vpvisible, hscaleupd, sliding, playerWidth, playerHeight;
 
@@ -174,15 +207,18 @@ int retval0;
 cpu_set_t cpu[4];
 char msg[256];
 GtkTargetEntry target_entries[2];
+instancesock sisocket;
 }vpwidgets;
 
 typedef struct
 {
 vpwidgets *vpw;
+microphone *mic;
+speaker *spk;
 int vqMaxLength, aqMaxLength, thread_count, spk_samplingrate;
 }playlistparams;
 
-void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, int vqMaxLength, int aqMaxLength, int spk_samplingrate, int thread_count);
+void init_playlistparams(playlistparams *plparams, vpwidgets *vpw, microphone *mic, speaker *spk, int vqMaxLength, int aqMaxLength, int spk_samplingrate, int thread_count);
 void close_playlistparams(playlistparams *plparams);
 void toggle_vp(vpwidgets *vpw, GtkWidget *togglebutton);
 void init_videoplayerwidgets(playlistparams *plp, int argc, char** argv, int playWidth, int playHeight, audiomixer *x);
@@ -190,4 +226,6 @@ void close_videoplayerwidgets(vpwidgets *vpw);
 void press_vp_stop_button(playlistparams *plp);
 void press_vp_resume_button(playlistparams *plp);
 void vpw_commandline(playlistparams *plp, int argcount);
+gpointer singleinstancethread(gpointer args);
+int singleinstance(playlistparams *plp, int portno, int argc, char **argv);
 #endif

@@ -1,4 +1,3 @@
-
 /*
  * Cover.c
  * 
@@ -719,6 +718,16 @@ static void vp_toggled(GtkWidget *togglebutton, gpointer data)
 
 int main(int argc, char *argv[])
 {
+	setlocale(LC_ALL, "tr_TR.UTF-8");
+
+	init_playlistparams(&plparams, &vpw1, &mic, &spk, 20, 20, samplingrate, 4); // video, audio, spk_samplingrate, thread_count
+
+	if (!singleinstance(&plparams, 2017, argc, argv))
+	{
+		//wprintf(L"multiple instance\n");
+		exit(0);
+	}
+
 	XInitThreads();
 
 	/* This is called in all GTK applications. Arguments are parsed
@@ -974,7 +983,6 @@ int main(int argc, char *argv[])
 	statusbar = gtk_statusbar_new();
 	gtk_container_add(GTK_CONTAINER(fxbox), statusbar);
 
-	init_playlistparams(&plparams, &vpw1, 20, 20, samplingrate, 4); // video, audio, spk_samplingrate, thread_count
 	//init_videoplayerwidgets(&plparams, argc, argv, 800, 450, &mx);
 	init_videoplayerwidgets(&plparams, argc, argv, 640, 360, &mx);
 
