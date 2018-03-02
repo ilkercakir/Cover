@@ -95,8 +95,8 @@ GtkWidget *spinbutton8;
 GtkWidget *rvrbbox2;
 GtkWidget *rvrbdelays;
 GtkWidget *comborvrbdelays;
-GtkWidget *rvrblabel3;
-GtkWidget *spinbutton11;
+//GtkWidget *rvrblabel3;
+//GtkWidget *spinbutton11;
 GtkWidget *rvrblabel4;
 GtkWidget *spinbutton18;
 eqdefaults reverbeqdef;
@@ -428,7 +428,7 @@ static void destroy(GtkWidget *widget, gpointer data)
 static void realize_cb(GtkWidget *widget, gpointer data)
 {
 	g_object_set((gpointer)delay1.combodelaytype, "active-id", "0", NULL);
-	g_object_set((gpointer)reverb1.comborvrbdelays, "active-id", "12", NULL);
+	g_object_set((gpointer)reverb1.comborvrbdelays, "active-id", "24", NULL);
 }
 
 static void inputdev_changed(GtkWidget *combo, gpointer data)
@@ -681,6 +681,7 @@ static void rvrbpresence_changed(GtkWidget *widget, gpointer data)
 	pthread_mutex_unlock(&(r->sndreverb.reverbmutex));
 }
 
+/*
 static void rvrbLSH_changed(GtkWidget *widget, gpointer data)
 {
 	reverbeffect *r = (reverbeffect*)data;
@@ -708,6 +709,21 @@ static void rvrbLPF_changed(GtkWidget *widget, gpointer data)
 	}
 	pthread_mutex_unlock(&(r->sndreverb.reverbmutex));
 }
+*/
+
+static void rvrbHSH_changed(GtkWidget *widget, gpointer data)
+{
+	reverbeffect *r = (reverbeffect*)data;
+
+	pthread_mutex_lock(&(r->sndreverb.reverbmutex));
+	float newvalue = (float)gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
+	r->reverbeqdef.eqfreqs[0] = newvalue;
+	if (r->sndreverb.enabled)
+	{
+		soundreverb_reinit(r->sndreverb.reverbdelaylines, r->sndreverb.feedback, r->sndreverb.presence, &(r->reverbeqdef), &(r->sndreverb));
+	}
+	pthread_mutex_unlock(&(r->sndreverb.reverbmutex));
+}
 
 static void vp_toggled(GtkWidget *togglebutton, gpointer data)
 {
@@ -716,9 +732,31 @@ static void vp_toggled(GtkWidget *togglebutton, gpointer data)
 	toggle_vp(vpw, togglebutton);
 }
 
+void setup_default_icon(char *filename)
+{
+	GdkPixbuf *pixbuf;
+	GError *err;
+
+	err = NULL;
+	pixbuf = gdk_pixbuf_new_from_file(filename, &err);
+
+	if (pixbuf)
+	{
+		GList *list;      
+
+		list = NULL;
+		list = g_list_append(list, pixbuf);
+		gtk_window_set_default_icon_list(list);
+		g_list_free(list);
+		g_object_unref(pixbuf);
+    	}
+}
+
 int main(int argc, char *argv[])
 {
 	setlocale(LC_ALL, "tr_TR.UTF-8");
+
+	setup_default_icon("./Cover.png");
 
 	init_playlistparams(&plparams, &vpw1, &mic, &spk, 20, 20, samplingrate, 4); // video, audio, spk_samplingrate, thread_count
 
@@ -958,6 +996,7 @@ int main(int argc, char *argv[])
     g_signal_connect(GTK_COMBO_BOX(reverb1.comborvrbdelays), "changed", G_CALLBACK(delaylines_changed), &reverb1);
     gtk_container_add(GTK_CONTAINER(reverb1.rvrbbox2), reverb1.comborvrbdelays);
 
+/*
 // LSH
 	reverb1.rvrblabel4 = gtk_label_new("LSH (Hz)");
 	gtk_widget_set_size_request(reverb1.rvrblabel4, 100, 30);
@@ -977,7 +1016,16 @@ int main(int argc, char *argv[])
 	gtk_spin_button_set_value(GTK_SPIN_BUTTON(reverb1.spinbutton11), reverb1.reverbeqdef.eqfreqs[1]);
 	g_signal_connect(GTK_SPIN_BUTTON(reverb1.spinbutton11), "value-changed", G_CALLBACK(rvrbLPF_changed), &reverb1);
 	gtk_container_add(GTK_CONTAINER(reverb1.rvrbbox2), reverb1.spinbutton11);
-
+*/
+// HSH
+	reverb1.rvrblabel4 = gtk_label_new("HSH (Hz)");
+	gtk_widget_set_size_request(reverb1.rvrblabel4, 100, 30);
+	gtk_container_add(GTK_CONTAINER(reverb1.rvrbbox2), reverb1.rvrblabel4);
+	reverb1.spinbutton18 = gtk_spin_button_new_with_range(1.0, 8000.0, 100.0);
+	gtk_widget_set_size_request(reverb1.spinbutton18, 120, 30);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(reverb1.spinbutton18), reverb1.reverbeqdef.eqfreqs[0]);
+	g_signal_connect(GTK_SPIN_BUTTON(reverb1.spinbutton18), "value-changed", G_CALLBACK(rvrbHSH_changed), &reverb1);
+	gtk_container_add(GTK_CONTAINER(reverb1.rvrbbox2), reverb1.spinbutton18);
 
 // statusbar
 	statusbar = gtk_statusbar_new();
